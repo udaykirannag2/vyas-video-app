@@ -1,0 +1,55 @@
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# Node
+node_modules/
+.pnpm-store/
+.next/
+out/
+
+# CDK / build
+cdk.out/
+cdk.context.json
+*.js.map
+.build/
+
+# Deploy artifacts (regenerable, contain account IDs / ARNs)
+infra/deploy-outputs.json
+infra/.cdk-staging/
+
+# Remotion build output
+remotion/out/
+remotion/dist/
+
+# Media — don't accidentally commit test audio / video
+*.mp3
+*.mp4
+*.m4a
+*.wav
+*.aac
+
+# Environment / secrets
+.env
+.env.*
+*.pem
+*.key
+secrets.json
+
+# Local Claude Code session / assistant state (may contain profile names etc.)
+.claude/
+
+# Sample transcripts / private docs dropped into the tree
+*.docx
+*.pdf

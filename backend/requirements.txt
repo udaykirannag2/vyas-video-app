@@ -1,0 +1,7 @@
+fastapi==0.115.0
+mangum==0.19.0
+pydantic>=2.11
+requests==2.32.3
+strands-agents==1.35.0
+# strands-agents-tools not needed — we don't use tool-use, only structured output.
+# boto3 not pinned — Lambda runtime ships a compatible boto3/botocore.

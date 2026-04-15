@@ -1,0 +1,11 @@
+{
+  "name": "vyas-remotion-invoker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "index.js",
+  "dependencies": {
+    "@remotion/lambda": "4.0.220",
+    "@aws-sdk/client-s3": "^3.645.0"
+  }
+}

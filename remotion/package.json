@@ -1,0 +1,21 @@
+{
+  "name": "vyas-video-remotion",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "remotion studio src/index.ts",
+    "build": "remotion render src/index.ts Reel out/reel.mp4",
+    "upgrade": "remotion upgrade"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.220",
+    "@remotion/lambda": "4.0.220",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.220"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.11",
+    "typescript": "5.6.2"
+  }
+}
