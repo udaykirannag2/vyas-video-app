@@ -36,17 +36,34 @@ Write each `visual` as a CAMERA DIRECTION with these elements:
      "ethereal soft glow", "harsh shadows", "misty diffused"
   4. MOTION: "slow motion", "time-lapse", "gentle sway", "still and meditative"
 
-Examples of GOOD Nova Reel descriptions:
-  ✅ "Slow zoom into a single candle flame flickering in complete darkness, warm golden light casting soft shadows on the walls"
-  ✅ "Aerial drift over a misty river at dawn, soft blue light, the water surface barely moving"
-  ✅ "Static close-up of hands releasing sand into the wind, golden hour backlight, slow motion particles catching the light"
-  ✅ "Tracking shot through a foggy forest path at blue hour, ethereal light filtering through the trees, no people"
-  ✅ "Pull back revealing a vast starfield, deep blue to black gradient, a single bright star pulsing gently"
+TONE: Every clip must feel like a frame from a contemplative short film about
+inner wisdom. Think Terrence Malick meets Alan Watts. Dreamlike, slow, warm.
+The podcast is about spiritual metaphors — the visuals should EVOKE the
+metaphor, not illustrate it literally.
 
-Examples of BAD descriptions (too vague for Nova):
-  ❌ "candle flame" (no camera, no mood)
-  ❌ "nature scene" (too generic)
-  ❌ "someone meditating" (Nova struggles with detailed human poses)
+Examples of GOOD Nova Reel descriptions:
+  ✅ "Slow zoom into a single candle flame flickering in complete darkness, warm golden light, contemplative spiritual atmosphere"
+  ✅ "Aerial drift over a misty river at dawn, soft ethereal blue light, the water surface barely moving, peaceful and meditative"
+  ✅ "Static close-up of hands gently releasing golden sand into the wind, backlit by golden hour sun, slow motion particles catching light, metaphor for letting go"
+  ✅ "Tracking shot through a foggy forest path at blue hour, ethereal light filtering through ancient trees, mysterious and contemplative"
+  ✅ "Pull back revealing a vast starfield, deep blue cosmic atmosphere, a single bright star pulsing gently, sense of infinite connection"
+  ✅ "Close-up of a water drop falling into a still pond, concentric ripples expanding outward in slow motion, warm golden light, metaphor for cause and effect"
+  ✅ "Slow dolly through a field of tall grass swaying in wind at golden hour, warm ethereal light, peaceful spiritual atmosphere, no people"
+
+Examples of BAD descriptions:
+  ❌ "candle flame" (no camera, no mood, too sparse for Nova)
+  ❌ "nature scene" (too generic — what nature? what mood?)
+  ❌ "someone meditating" (Nova renders faces poorly; too literal)
+  ❌ "a car driving on road" (literal, not metaphorical — even if the VO
+     mentions a car, the visual should be metaphorical: flowing water for
+     movement, a road disappearing into fog for journey, etc.)
+  ❌ "a party with alcohol" (literal — use ink dissolving in water for
+     "something clouding clarity" instead)
+
+KEY PRINCIPLE: If the VO talks about a car/Tesla, the visual should NOT be a
+car. It should be the METAPHOR the car represents — control, direction, energy
+flow. If the VO talks about alcohol, the visual should be fog, murky water,
+or smoke — not a bar scene. Always one level of abstraction UP from the literal.
 
 Topic-to-visual mappings:
   - ego / attachment → hands releasing objects, wind carrying leaves, water flowing

@@ -23,18 +23,27 @@ DURATION_SECONDS = 6
 FPS = 24
 
 
+_SPIRITUAL_PREFIX = (
+    "A cinematic, meditative, spiritual short film clip. "
+    "Metaphorical and contemplative — not literal or religious. "
+    "No text, no faces, no religious symbols. "
+    "Smooth, slow, dreamlike motion. Warm or ethereal lighting. "
+)
+
+
 def start(prompt: str, output_bucket: str, output_prefix: str, *, max_retries: int = 5) -> str:
     """Fire an async Nova Reel job with retry on throttling.
 
-    Nova writes `<output_prefix>/<invocation-id>/output.mp4` into the bucket.
-    Returns the invocationArn (used for polling).
+    Prepends a spiritual/metaphorical style prefix to every prompt so Nova
+    generates contemplative, atmospheric clips instead of literal or generic ones.
     """
     s3_uri = f"s3://{output_bucket}/{output_prefix.rstrip('/')}/"
+    full_prompt = (_SPIRITUAL_PREFIX + prompt)[:512]
     payload = {
         "modelId": NOVA_REEL_MODEL,
         "modelInput": {
             "taskType": "TEXT_VIDEO",
-            "textToVideoParams": {"text": prompt[:512]},
+            "textToVideoParams": {"text": full_prompt},
             "videoGenerationConfig": {
                 "durationSeconds": DURATION_SECONDS,
                 "fps": FPS,

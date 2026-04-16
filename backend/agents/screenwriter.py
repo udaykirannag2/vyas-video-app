@@ -53,15 +53,48 @@ CONTINUITY RULES (most important — non-negotiable):
 Scene 1 MUST be the hook — the window was chosen because it opens strong.
 
 - on_screen_text: SHORT (2-5 words), shouted-capitals, for silent autoplay.
-- visual: one-sentence CINEMATIC scene description for AI video generation.
-  Write it as a camera direction: "Slow zoom into a single candle flame
-  flickering in a dark room" not "candle flame". Be specific about:
-    • Camera motion (slow zoom, pull back, tracking shot, static close-up)
-    • Subject (what we see)
-    • Mood/lighting (golden hour, dark moody, misty, ethereal)
-    • Motion (slow motion, time-lapse, still)
-  This feeds directly to Amazon Nova Reel — the more cinematic the
-  description, the better the generated video.
+- visual: one-sentence METAPHORICAL cinematic scene description for Amazon
+  Nova Reel (AI text-to-video).
+
+  THE PODCAST IS SPIRITUAL — visuals must be METAPHORS for the idea, NOT
+  literal illustrations of what's said. Examples:
+    VO says "God didn't make you win" → visual is flowing water, not a temple
+    VO says "alcohol clouds knowledge" → visual is ink dispersing in water,
+       not a bar or drink
+    VO says "Tesla doesn't drive itself" → visual is wind pushing a sail or
+       hands gripping a wheel, not a car
+    VO says "rope mistaken for a snake" → visual is a coiled rope in shadow
+       slowly revealed by light, or ripples in dark water
+    VO says "ego is covered" → visual is mist obscuring a mountain, glass
+       fogging over, or a lantern slowly dimmed
+
+  Each visual MUST include:
+    • Camera motion: "Slow zoom into", "Pull back revealing", "Tracking shot",
+      "Aerial drift over", "Static close-up of", "Dolly through"
+    • Metaphorical subject (one level abstract from the literal VO)
+    • Lighting/mood: "warm golden hour light", "ethereal blue hour", "soft
+      ambient glow", "cinematic moody", "contemplative", "spiritual atmosphere"
+    • Motion quality: "slow motion", "gentle sway", "dreamlike", "meditative"
+    • NO faces, NO religious symbols, NO text in frame, NO literal objects
+      from the VO.
+
+  GOOD examples:
+  ✅ "Slow zoom into a single candle flame flickering in deep darkness, warm
+     golden light, contemplative spiritual atmosphere"
+  ✅ "Aerial drift over a misty mountain valley at dawn, ethereal soft blue
+     light, dreamlike meditative mood"
+  ✅ "Close-up of golden sand slipping through fingers in slow motion,
+     backlit warm sun, metaphor for letting go"
+  ✅ "Pull back to reveal a vast cosmic starfield with a single pulsing star,
+     deep blue ethereal atmosphere, sense of infinite presence"
+  ✅ "Ripples expanding across a still dark pond after a single drop,
+     reflective moonlight, peaceful and metaphorical"
+
+  BAD examples:
+  ❌ "A man in saffron robes sitting in meditation" (literal, religious)
+  ❌ "A red Tesla driving fast" (literal from the VO analogy)
+  ❌ "People drinking at a party" (literal from the VO)
+  ❌ "A temple with priests" (religious, narrows audience)
 
 B-ROLL QUERIES — 3 ordered alternates per scene.
 Think in METAPHORS not literal nouns. The podcast is spiritual/philosophical.
