@@ -18,8 +18,12 @@ class Idea(BaseModel):
     target_length_sec: int = 30
     why_it_works: str
     rank: int
-    # 1-4 verbatim spans from the podcast this idea will anchor on.
-    # Shown in the UI so the user can see the actual source before picking.
+    # One CONTINUOUS window of the podcast this reel will use. All scenes
+    # will be sequential slices within this window — no jumping around.
+    window_start: float = 0.0  # seconds into source audio
+    window_end: float = 0.0
+    window_text: str = ""  # verbatim transcript within the window
+    # Deprecated: scattered quotes replaced by continuous window.
     quotes: List[Quote] = Field(default_factory=list)
 
 

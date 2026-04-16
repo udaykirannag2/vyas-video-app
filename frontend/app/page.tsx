@@ -452,10 +452,36 @@ function IdeaRow({ idea, onOpen }: { idea: EpisodeIdea; onOpen: () => void }) {
       <p style={{ color: "var(--muted)", margin: "4px 0 8px", fontSize: 13 }}>
         {idea.verse_ref} · {idea.target_length_sec}s · {idea.why_it_works}
       </p>
-      {idea.quotes?.length > 0 && (
+      {idea.window_start > 0 && idea.window_end > 0 && (
         <div style={{ margin: "8px 0 12px" }}>
           <div style={{ color: "var(--muted)", fontSize: 12, marginBottom: 4 }}>
-            Verbatim quotes this reel will use:
+            Continuous audio window:
+          </div>
+          <div
+            style={{
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              padding: "8px 12px",
+              background: "#161b26",
+              fontSize: 13,
+            }}
+          >
+            <div style={{ color: "var(--accent)", fontSize: 12, marginBottom: 4 }}>
+              {idea.window_start.toFixed(1)}s – {idea.window_end.toFixed(1)}s
+              ({(idea.window_end - idea.window_start).toFixed(0)}s clip)
+            </div>
+            <div style={{ color: "var(--text)", lineHeight: 1.5 }}>
+              "{idea.window_text.length > 250
+                ? idea.window_text.slice(0, 250) + "…"
+                : idea.window_text}"
+            </div>
+          </div>
+        </div>
+      )}
+      {!idea.window_start && idea.quotes?.length > 0 && (
+        <div style={{ margin: "8px 0 12px" }}>
+          <div style={{ color: "var(--muted)", fontSize: 12, marginBottom: 4 }}>
+            Verbatim quotes (legacy):
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {idea.quotes.map((q, i) => (
@@ -665,7 +691,7 @@ function IdeaView({
                     }}
                   >
                     <span>scene {idx + 1} · {s.start}–{s.end}s</span>
-                    {s.source_start != null && s.source_end != null && (
+                    {typeof s.source_start === "number" && typeof s.source_end === "number" && (
                       <span style={{ color: "var(--accent)" }}>
                         source {s.source_start.toFixed(1)}–{s.source_end.toFixed(1)}s
                       </span>

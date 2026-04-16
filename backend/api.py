@@ -26,6 +26,7 @@ import re
 import time
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 import boto3
@@ -62,6 +63,17 @@ SELF_FUNCTION_NAME = ""
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _floats_to_decimal(obj: Any) -> Any:
+    """Recursively convert float → Decimal for DynamoDB compatibility."""
+    if isinstance(obj, float):
+        return Decimal(str(obj))
+    if isinstance(obj, dict):
+        return {k: _floats_to_decimal(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_floats_to_decimal(v) for v in obj]
+    return obj
 
 
 def _ep_pk(ep_id: int | str) -> str:
@@ -288,6 +300,8 @@ def _run_ideation(episode_id: int) -> None:
         for idea in ideas.ideas:
             item = idea.model_dump()
             item["quotes"] = json.dumps(item.get("quotes", []))
+            # DDB rejects Python float; convert to Decimal recursively.
+            item = _floats_to_decimal(item)
             _ddb.put_item(
                 Item={
                     "pk": _ep_pk(episode_id),
@@ -408,6 +422,11 @@ def _idea_view(i: dict[str, Any]) -> dict[str, Any]:
         "verse_ref": i.get("verse_ref", ""),
         "target_length_sec": int(i.get("target_length_sec", 30)),
         "why_it_works": i.get("why_it_works", ""),
+        # Continuous window (new)
+        "window_start": float(i.get("window_start", 0)),
+        "window_end": float(i.get("window_end", 0)),
+        "window_text": i.get("window_text", ""),
+        # Deprecated scattered quotes (kept for old data)
         "quotes": quotes,
     }
 
@@ -488,6 +507,9 @@ def _load_idea(ep_id: int, rank: int) -> Idea:
         target_length_sec=int(item["target_length_sec"]),
         why_it_works=item["why_it_works"],
         rank=int(item["sk"].split("#")[1]),
+        window_start=float(item.get("window_start", 0)),
+        window_end=float(item.get("window_end", 0)),
+        window_text=item.get("window_text", ""),
         quotes=quotes,
     )
 
@@ -626,6 +648,18 @@ def _align_scene_timelines(screenplay: Screenplay) -> Screenplay:
         print(f"[align] scenes over 8s cap: {over_cap} — total reel {t:.1f}s")
     if t > 45:
         print(f"[align] ⚠ reel total {t:.1f}s exceeds 45s target — consider revising")
+
+    # Continuity check: scenes should be sequential in source audio.
+    for i in range(1, len(screenplay.scenes)):
+        prev = screenplay.scenes[i - 1]
+        curr = screenplay.scenes[i]
+        if prev.source_end is not None and curr.source_start is not None:
+            gap = abs(float(curr.source_start) - float(prev.source_end))
+            if gap > 1.0:
+                print(
+                    f"[align] ⚠ gap {gap:.1f}s between scene {i} and {i+1} "
+                    f"(source {prev.source_end:.1f} → {curr.source_start:.1f})"
+                )
     return screenplay
 
 

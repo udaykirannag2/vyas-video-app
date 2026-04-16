@@ -15,6 +15,11 @@ export interface Idea {
   target_length_sec: number;
   why_it_works: string;
   rank: number;
+  // Continuous audio window this reel will use
+  window_start: number;
+  window_end: number;
+  window_text: string;
+  // Deprecated
   quotes: Quote[];
 }
 

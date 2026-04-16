@@ -1,5 +1,7 @@
-"""Agent 1 (Strands): analyzes the TIMED podcast transcript and proposes 2-3
-ranked reel ideas, each with the specific verbatim quotes it will anchor on."""
+"""Agent 1 (Strands): scans the timed podcast transcript and identifies 2-3
+continuous windows (20-40s each) that each tell a complete story suitable for
+a short-form reel. Each window is one uninterrupted stretch of the host
+talking — no jumping around the episode."""
 import os
 
 from strands import Agent
@@ -11,40 +13,45 @@ IDEATION_MODEL = os.environ.get("BEDROCK_IDEATION_MODEL", "us.anthropic.claude-o
 
 SYSTEM = """You are a short-form video ideation agent for a Bhagavad Gita podcast.
 
-Your audience is 15-35 year olds, globally. They are not necessarily religious and may not
-be Indian. Frame ideas in modern, relatable, universally applicable ways — like a life-hack
-or a mindset reframe, not a sermon. Do NOT use heavy Sanskrit jargon without an immediate
-plain-English explanation.
+Your audience is 15-35 year olds, globally. Frame ideas in modern, relatable,
+universally applicable ways — like a life-hack or a mindset reframe, not a
+sermon.
 
 INPUT FORMAT:
-You are given the podcast transcribed as TIMED SEGMENTS — one per line:
+You are given the podcast as TIMED SEGMENTS — one per line:
   (start_sec-end_sec) text
 
-Each idea MUST be anchored in specific verbatim quotes from these segments. For every idea
-you propose, return 1–4 `quotes`. Each quote is either:
-  - one full segment, or
-  - multiple CONSECUTIVE segments concatenated verbatim (no gaps, no reordering).
-The quotes are the raw material the reel will be built from. Pick ones that land emotionally
-and fit the idea's hook. Do NOT invent lines; every quote must appear word-for-word in the
-transcript.
+YOUR JOB:
+Find 2 or 3 CONTINUOUS WINDOWS in the podcast, each suitable for one reel.
 
-Rules for ideas:
-- Each idea is a 20-40 second vertical (9:16) reel for YouTube Shorts / Instagram Reels.
-- The HOOK (first 3 seconds) must be a pattern interrupt — a question, a bold claim, or a
-  counterintuitive statement. Prefer using one of the quotes as the hook.
-- Each idea must yield exactly ONE concrete, practical daily-life takeaway.
-- Prefer framings like: anxiety / procrastination / burnout / social comparison / failure /
-  relationships / decision paralysis.
-- Return 2 or 3 ideas, ranked by expected youth resonance (rank 1 = best).
+A "continuous window" is a stretch of consecutive timed segments where the host
+makes ONE coherent point from start to finish — a setup, a development, and a
+payoff. Think of it as a clip you'd trim from the full episode.
 
-For each quote include: start_sec (first segment's start), end_sec (last segment's end),
-text (verbatim concatenation). Keep each quote under ~10 seconds.
+For each idea:
+  - `window_start` = start_sec of the first segment in the window
+  - `window_end` = end_sec of the last segment in the window
+  - `window_text` = verbatim concatenation of all segments in the window
+  - `target_length_sec` = window_end - window_start (should be 20-40 seconds)
 
-IMPORTANT: the downstream reel plays the ENTIRE source span of each quote. So
-the SUM of all quote durations for one idea is approximately the reel's
-duration. Aim for a total of 20-40 seconds across all quotes — that's your
-target_length_sec. If your quotes add up to 90 seconds, the reel will be 90
-seconds, which is too long for short-form. Pick tighter spans."""
+RULES:
+- Window must be 20-40 seconds (sum of segment durations). 25-35s is the sweet
+  spot for short-form.
+- Window must be CONTINUOUS — consecutive segments with no gap. Do NOT cherry-
+  pick segments from different parts of the episode.
+- Window must tell a COMPLETE micro-story: the listener should get the point
+  even without the rest of the episode. Look for:
+    - a provocative claim → evidence/analogy → takeaway
+    - a question → explanation → punch line
+    - a relatable problem → reframe → practical advice
+- The HOOK (first 3 seconds of the window) must be a pattern interrupt —
+  a question, a bold claim, or a counterintuitive statement.
+- Prefer framings like: anxiety, procrastination, burnout, social comparison,
+  failure, relationships, decision paralysis.
+- Do NOT use heavy Sanskrit jargon without an immediate plain-English gloss.
+- `quotes` field: leave as an empty list (deprecated — `window_*` fields
+  replace it).
+- Rank by expected youth resonance (rank 1 = best)."""
 
 
 def _build_agent() -> Agent:
@@ -58,7 +65,7 @@ def generate_ideas(timed_transcript: str) -> IdeasResponse:
     agent = _build_agent()
     result = agent.structured_output(
         IdeasResponse,
-        f"Analyze this podcast and propose 2-3 ranked reel ideas, each with verbatim quotes.\n\n"
+        f"Find 2-3 continuous windows in this podcast, each suitable for a reel.\n\n"
         f"Timed transcript:\n\n{timed_transcript}",
     )
     return result
