@@ -1,7 +1,11 @@
-"""Agent 1 (Strands): scans the timed podcast transcript and identifies 2-3
-continuous windows (20-40s each) that each tell a complete story suitable for
-a short-form reel. Each window is one uninterrupted stretch of the host
-talking — no jumping around the episode."""
+"""Agent 1 (Strands): reads plain text transcript and identifies the START
+and END phrases of 2-3 reel-worthy topic passages. Code then extracts the
+full passage and aligns to audio timestamps.
+
+This two-pass design keeps the LLM focused on content understanding:
+  - LLM identifies WHERE a topic begins and ends (semantic task)
+  - Code extracts and aligns (mechanical task)
+"""
 import os
 
 from strands import Agent
@@ -17,55 +21,100 @@ Your audience is 15-35 year olds, globally. Frame ideas in modern, relatable,
 universally applicable ways — like a life-hack or a mindset reframe, not a
 sermon.
 
-INPUT FORMAT:
-You are given the podcast as TIMED SEGMENTS — one per line:
-  (start_sec-end_sec) text
+INPUT: The plain text transcript of a podcast episode.
 
 YOUR JOB:
-Find 2 or 3 CONTINUOUS WINDOWS in the podcast, each suitable for one reel.
+Find 2 or 3 passages in the transcript that would each make a great
+20-35 second reel (50-90 words). For each, identify:
 
-A "continuous window" is a stretch of consecutive timed segments where the host
-makes ONE coherent point from start to finish — a setup, a development, and a
-payoff. Think of it as a clip you'd trim from the full episode.
+  1. `start_phrase` — the FIRST 6-10 words of the passage, copied exactly
+     from the transcript. This is where the topic BEGINS (the hook/setup).
 
-For each idea:
-  - `window_start` = start_sec of the first segment in the window
-  - `window_end` = end_sec of the last segment in the window
-  - `window_text` = verbatim concatenation of all segments in the window
-  - `target_length_sec` = window_end - window_start (should be 20-40 seconds)
+  2. `end_phrase` — the LAST 6-10 words of the passage, copied exactly
+     from the transcript. This is where the topic's CONCLUSION/PAYOFF lands.
 
-RULES:
-- Window must be 20-40 seconds (sum of segment durations). 25-35s is the sweet
-  spot for short-form.
-- Window must be CONTINUOUS — consecutive segments with no gap. Do NOT cherry-
-  pick segments from different parts of the episode.
-- Window must tell a COMPLETE micro-story: the listener should get the point
-  even without the rest of the episode. Look for:
-    - a provocative claim → evidence/analogy → takeaway
-    - a question → explanation → punch line
-    - a relatable problem → reframe → practical advice
-- The HOOK (first 3 seconds of the window) must be a pattern interrupt —
-  a question, a bold claim, or a counterintuitive statement.
-- Prefer framings like: anxiety, procrastination, burnout, social comparison,
-  failure, relationships, decision paralysis.
-- Do NOT use heavy Sanskrit jargon without an immediate plain-English gloss.
-- `quotes` field: leave as an empty list (deprecated — `window_*` fields
-  replace it).
-- Rank by expected youth resonance (rank 1 = best)."""
+The code will extract everything between start_phrase and end_phrase from the
+transcript. You do NOT need to copy the full passage — just identify its
+boundaries by meaning.
+
+RULES FOR PICKING BOUNDARIES:
+
+start_phrase must be the beginning of the topic:
+  ✅ "So a lot of times the misunderstanding is" — clear topic opener
+  ✅ "Let's take the example of a bright person" — starts an analogy
+  ❌ "Um, so, yeah" — filler, not a real start
+
+end_phrase must be AFTER the topic's conclusion/payoff:
+  ✅ "that is their nature, their swabhava, and you have yours" — conclusion
+  ✅ "and that's the whole teaching of this verse" — wrap-up
+  ❌ "tigers, lions are ferocious, and cows are" — mid-comparison, INCOMPLETE
+  ❌ "but our knowledge is covered by" — mid-sentence, INCOMPLETE
+
+The passage between start and end should be a COMPLETE MINI-TALK:
+  - setup → development → payoff
+  - 50-90 words (20-35 seconds spoken)
+  - Self-contained: someone who hears ONLY this clip understands the point
+  - Ends AFTER the host lands the conclusion, not mid-analogy
+
+Also return:
+  - title: punchy reel title (max 60 chars)
+  - hook: the first 3 seconds of voiceover
+  - summary: 2-3 sentence description
+  - verse_ref: Bhagavad Gita verse reference
+  - why_it_works: resonance with 15-35 audience
+  - target_length_sec: estimated spoken duration
+  - rank: 1 = best
+
+Set window_start, window_end to 0 (code fills them). Set window_text to ""
+(code fills it). Set quotes to empty list (deprecated).
+
+Put start_phrase and end_phrase inside the `hook` and `summary` fields
+respectively using this format:
+  hook: "START_PHRASE: <the exact start phrase>"
+  summary: "END_PHRASE: <the exact end phrase> ||| <your actual summary>"
+
+This encoding lets us parse them without changing the schema."""
 
 
 def _build_agent() -> Agent:
     return Agent(
-        model=BedrockModel(model_id=IDEATION_MODEL, temperature=0.8),
+        model=BedrockModel(model_id=IDEATION_MODEL, temperature=0.7),
         system_prompt=SYSTEM,
     )
 
 
-def generate_ideas(timed_transcript: str) -> IdeasResponse:
+def generate_ideas(plain_transcript: str) -> IdeasResponse:
     agent = _build_agent()
     result = agent.structured_output(
         IdeasResponse,
-        f"Find 2-3 continuous windows in this podcast, each suitable for a reel.\n\n"
-        f"Timed transcript:\n\n{timed_transcript}",
+        f"Find 2-3 reel-worthy topic passages. For each, identify the start "
+        f"and end phrases (boundaries) of the complete topic.\n\n"
+        f"Transcript:\n\n{plain_transcript}",
     )
     return result
+
+
+def parse_phrases(idea_dict: dict) -> tuple[str, str, str]:
+    """Extract start_phrase, end_phrase, and clean summary from the encoded fields."""
+    hook = idea_dict.get("hook", "")
+    summary = idea_dict.get("summary", "")
+
+    start_phrase = ""
+    if "START_PHRASE:" in hook:
+        start_phrase = hook.split("START_PHRASE:", 1)[1].strip().strip('"').strip()
+    else:
+        # Fallback: use hook as-is (first few words)
+        start_phrase = hook.strip()
+
+    end_phrase = ""
+    clean_summary = summary
+    if "END_PHRASE:" in summary:
+        parts = summary.split("END_PHRASE:", 1)[1]
+        if "|||" in parts:
+            end_phrase, clean_summary = parts.split("|||", 1)
+        else:
+            end_phrase = parts
+        end_phrase = end_phrase.strip().strip('"').strip()
+        clean_summary = clean_summary.strip()
+
+    return start_phrase, end_phrase, clean_summary

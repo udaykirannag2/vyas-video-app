@@ -36,9 +36,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 from pydantic import BaseModel
 
-from agents.ideation import generate_ideas
+from agents.ideation import generate_ideas, parse_phrases
 from agents.screenwriter import write_script, revise_script
 from agents.visual_director import direct as direct_visuals
+from align import align_by_phrases, align_passage
 from audio_slice import slice_scenes
 from models import Idea, Screenplay
 
@@ -63,6 +64,85 @@ SELF_FUNCTION_NAME = ""
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_timed_segments(timed_transcript: str) -> list[dict[str, Any]]:
+    """Parse "(start-end) text" lines into [{start, end, text}, ...]."""
+    import re as _re
+    segments = []
+    for line in timed_transcript.strip().split("\n"):
+        m = _re.match(r"\((\d+\.?\d*)-(\d+\.?\d*)\)\s*(.*)", line.strip())
+        if m:
+            segments.append({
+                "start": float(m.group(1)),
+                "end": float(m.group(2)),
+                "text": m.group(3),
+            })
+    return segments
+
+
+_SENTENCE_END = frozenset(".?!:")
+
+
+def _extend_window_to_sentence_end(
+    idea_dict: dict[str, Any],
+    segments: list[dict[str, Any]],
+    max_extension: float = 12.0,
+) -> dict[str, Any]:
+    """If window_text ends mid-sentence, extend window_end by appending the next
+    segments until we find sentence-ending punctuation or hit the max extension.
+
+    Mutates and returns idea_dict.
+    """
+    wt = idea_dict.get("window_text", "").rstrip()
+    we = float(idea_dict.get("window_end", 0))
+    if not wt or not we:
+        return idea_dict
+    # Check the last meaningful word (ignoring trailing punctuation). If it's a
+    # function word that normally precedes a complement (verb, conjunction,
+    # article, preposition), the thought is almost certainly incomplete — even
+    # if Transcribe placed a period there (it punctuates on pauses, not grammar).
+    stripped = wt.rstrip(" .?!:;,")
+    last_word = stripped.split()[-1].lower() if stripped else ""
+    _DANGLING_WORDS = frozenset(
+        "is are was were am be been being "
+        "and but or nor yet so "
+        "the a an "
+        "to of for in on at by with from into "
+        "that which who whom whose where when "
+        "has have had do does did "
+        "not no".split()
+    )
+    if last_word not in _DANGLING_WORDS:
+        # Ends on a content word (noun, adjective, adverb) — likely complete.
+        return idea_dict
+    print(f"[extend] last word '{last_word}' is dangling — extending window despite punctuation")
+
+    print(f"[extend] window_text ends mid-sentence: '...{wt[-60:]}'")
+    extended_text = wt
+    extended_end = we
+    budget = max_extension
+
+    for seg in segments:
+        if seg["start"] < we - 0.5:
+            continue  # segment starts before our window
+        if seg["start"] > we + 1.0:
+            # gap — this segment isn't adjacent
+            break
+        extended_text += " " + seg["text"]
+        extended_end = seg["end"]
+        budget -= (seg["end"] - seg["start"])
+        if extended_text.rstrip()[-1] in _SENTENCE_END:
+            print(f"[extend] found sentence end at {extended_end:.1f}s (+{we - float(idea_dict['window_end']):.1f}s)")
+            break
+        if budget <= 0:
+            print(f"[extend] hit max extension budget at {extended_end:.1f}s")
+            break
+
+    idea_dict["window_text"] = extended_text.strip()
+    idea_dict["window_end"] = extended_end
+    idea_dict["target_length_sec"] = int(round(extended_end - float(idea_dict["window_start"])))
+    return idea_dict
 
 
 def _floats_to_decimal(obj: Any) -> Any:
@@ -295,8 +375,38 @@ def _run_ideation(episode_id: int) -> None:
         meta = _get_meta(episode_id)
         if not meta.get("transcript_key"):
             raise RuntimeError("transcript missing")
+        # Two-pass ideation:
+        # Pass 1 — LLM reads PLAIN TEXT, identifies topic boundaries by meaning.
+        plain = _load_transcript(episode_id)
+        ideas = generate_ideas(plain)
+
+        # Pass 2 — Code aligns start/end phrases to timed-transcript timestamps.
         timed = _load_timed_transcript(episode_id)
-        ideas = generate_ideas(timed)
+        segments = _parse_timed_segments(timed)
+        for idea in ideas.ideas:
+            idea_dict = idea.model_dump()
+            start_phrase, end_phrase, clean_summary = parse_phrases(idea_dict)
+            print(f"[align] idea {idea.rank}: start='{start_phrase[:50]}' end='{end_phrase[:50]}'")
+            try:
+                if start_phrase and end_phrase:
+                    ws, we, matched = align_by_phrases(start_phrase, end_phrase, segments)
+                else:
+                    # Fallback: try full-passage match on window_text
+                    passage = idea.window_text or idea.hook or ""
+                    ws, we, matched = align_passage(passage, segments)
+                idea.window_start = ws
+                idea.window_end = we
+                idea.window_text = matched
+                idea.target_length_sec = int(round(we - ws))
+                if clean_summary:
+                    idea.summary = clean_summary
+                # Restore clean hook (strip the START_PHRASE: encoding)
+                if "START_PHRASE:" in idea.hook:
+                    idea.hook = start_phrase
+                print(f"[align] idea {idea.rank}: {ws:.1f}-{we:.1f}s ({we-ws:.0f}s)")
+            except ValueError as e:
+                print(f"[align] idea {idea.rank}: alignment failed: {e}")
+
         for idea in ideas.ideas:
             item = idea.model_dump()
             item["quotes"] = json.dumps(item.get("quotes", []))
