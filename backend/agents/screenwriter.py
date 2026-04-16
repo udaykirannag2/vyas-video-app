@@ -38,11 +38,54 @@ If you cannot find a clean verbatim span for a scene, make the reel SHORTER (few
 A short authentic reel is better than a padded one with invented content.
 
 Output a scene-by-scene screenplay for a vertical 9:16 reel. Rules:
-- Total duration 20-40 seconds. Scenes are typically 2-6 seconds each.
-- Scene 1 MUST be the hook — use the punchiest available quote.
-- scene `start` and `end` are POSITIONS IN THE REEL (timeline), flowing 0 → duration_sec
-  with no gaps.
-- scene `source_start` and `source_end` are POSITIONS IN THE SOURCE PODCAST (required).
+
+HARD LENGTH CAPS (non-negotiable):
+- **Per-scene source span: MAX 8 seconds. Target 3-5 seconds.**
+- **Total reel (sum of all scene source spans): MAX 40 seconds. Target 25-32 seconds.**
+- Reel should have 4-7 scenes.
+
+These caps override literally every other consideration. A scene at
+source_start=10.0, source_end=18.5 (8.5 seconds long) is INVALID. A reel
+where the scenes sum to 45+ seconds is INVALID.
+
+How to respect the caps:
+- The idea's pre-picked `quotes` are a HINT about topic, not a scene-to-scene
+  script. A 22-second quote becomes 2-3 scenes, each ≤ 8s.
+- Scan the timed transcript for shorter atomic beats: a sharp question, a one-
+  sentence claim, a punchline. Those are your scenes.
+- If a 12-second quote ends mid-sentence at the 6-second mark, that's probably
+  a good scene boundary.
+
+Concrete example of a GOOD 5-scene, 28-second script (made up):
+  scene 1: 0.0-4.2s    (source 236.2-240.4)   "What if God isn't doing this?"
+  scene 2: 4.2-10.8s   (source 448.6-455.2)   "The electricity doesn't decide."
+  scene 3: 10.8-16.5s  (source 462.0-467.7)   "You're the one steering."
+  scene 4: 16.5-22.0s  (source 476.9-482.4)   "Your actions. Your result."
+  scene 5: 22.0-28.3s  (source 511.7-518.0)   "That's the whole thing."
+
+Note every span is ≤ 8s, there are 5 scenes, total is 28.3s. THIS is the shape.
+
+Scene 1 MUST be the hook — use the punchiest short span available.
+
+TIMELINE RULE (critical — do not get this wrong):
+For every scene, reel duration EQUALS source span duration. Concretely:
+  scene.end - scene.start  ==  scene.source_end - scene.source_start
+
+And scenes flow consecutively with no gap:
+  scene[0].start = 0
+  scene[i].start = scene[i-1].end
+
+So if you pick a 7.2-second source span for scene 1, scene 1 is 7.2s in the
+reel. If scene 2's source is 12.4s, scene 2 runs from 7.2s to 19.6s. And so on.
+`duration_sec` at the top level equals the last scene's `end`.
+
+This is hard-enforced downstream: if you produce mismatched times, a normalizer
+will rewrite them. So just do it correctly — pick the SHORTEST coherent source
+spans that still land the idea. If a span is too long for a reel (>10s), pick
+a different/shorter span from the transcript.
+
+- on_screen_text: SHORT (2-5 words), shouted-capitals, for silent autoplay viewers.
+- visual: one-sentence b-roll direction.
 - on_screen_text: SHORT (2-5 words), shouted-capitals, for silent autoplay viewers.
 - visual: one-sentence b-roll direction.
 

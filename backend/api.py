@@ -596,6 +596,39 @@ def _with_visual_director(screenplay: Screenplay) -> Screenplay:
         return screenplay
 
 
+def _align_scene_timelines(screenplay: Screenplay) -> Screenplay:
+    """Force reel timeline to equal source spans, scene by scene.
+
+    Strict-verbatim means we slice the FULL source span for each scene's audio.
+    If the reel timeline (scene.start/end) is shorter than that span, Remotion
+    cuts the audio off mid-sentence. This normalizer rewrites each scene's
+    start/end so they match the source span duration exactly, and lays scenes
+    back-to-back from 0. Total duration_sec is updated to match.
+
+    Idempotent: re-running on aligned data is a no-op.
+    """
+    t = 0.0
+    over_cap = []
+    for i, scene in enumerate(screenplay.scenes):
+        if scene.source_start is None or scene.source_end is None:
+            # Bug-guard scene with no source span — keep whatever duration the
+            # screenwriter gave us (Polly synth path).
+            dur = max(0.5, float(scene.end) - float(scene.start))
+        else:
+            dur = max(0.5, float(scene.source_end) - float(scene.source_start))
+        if dur > 9:
+            over_cap.append((i + 1, round(dur, 1)))
+        scene.start = round(t, 2)
+        scene.end = round(t + dur, 2)
+        t += dur
+    screenplay.duration_sec = int(round(t))
+    if over_cap:
+        print(f"[align] scenes over 8s cap: {over_cap} — total reel {t:.1f}s")
+    if t > 45:
+        print(f"[align] ⚠ reel total {t:.1f}s exceeds 45s target — consider revising")
+    return screenplay
+
+
 def _run_script_task(
     *,
     kind: str,
@@ -629,6 +662,7 @@ def _run_script_task(
             raise RuntimeError(f"unknown script task kind: {kind!r}")
 
         screenplay = _with_visual_director(screenplay)
+        screenplay = _align_scene_timelines(screenplay)
         script_dict = screenplay.model_dump()
         scene_audio = slice_scenes(
             episode_id=episode_id,

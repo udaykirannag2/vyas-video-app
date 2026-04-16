@@ -1,10 +1,13 @@
 import React from "react";
-import { AbsoluteFill, Video } from "remotion";
+import { AbsoluteFill, OffthreadVideo } from "remotion";
 
+// OffthreadVideo decodes frames on-demand inside Remotion Lambda's Chromium,
+// avoiding the full-clip preload that Video does (which blows past the
+// default 28s delayRender timeout for scenes >10s).
 export const BRollClip: React.FC<{ src: string }> = ({ src }) => {
   return (
     <AbsoluteFill>
-      <Video
+      <OffthreadVideo
         src={src}
         muted
         style={{

@@ -38,7 +38,13 @@ Rules for ideas:
 - Return 2 or 3 ideas, ranked by expected youth resonance (rank 1 = best).
 
 For each quote include: start_sec (first segment's start), end_sec (last segment's end),
-text (verbatim concatenation). Keep each quote under ~15 seconds."""
+text (verbatim concatenation). Keep each quote under ~10 seconds.
+
+IMPORTANT: the downstream reel plays the ENTIRE source span of each quote. So
+the SUM of all quote durations for one idea is approximately the reel's
+duration. Aim for a total of 20-40 seconds across all quotes — that's your
+target_length_sec. If your quotes add up to 90 seconds, the reel will be 90
+seconds, which is too long for short-form. Pick tighter spans."""
 
 
 def _build_agent() -> Agent:
