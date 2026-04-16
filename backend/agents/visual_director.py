@@ -1,11 +1,12 @@
-"""Agent 3 (Strands, Haiku 4.5): rewrites `broll_queries` on an already-written
-screenplay so the stock-footage picker gets better candidates.
+"""Agent 3 (Strands, Haiku 4.5): polishes the `visual` field on each scene
+for Amazon Nova Reel text-to-video generation. Also keeps broll_queries
+as a Pexels fallback.
 
-The screenwriter has many jobs (verbatim VO, timestamps, hook, on-screen text,
-caption, hashtags, and visuals). Visuals get less attention than they deserve.
-This agent does one thing: re-score each scene's b-roll queries with a
-cinematographer's eye, optimizing for Pexels-friendly texture + motion
-vocabulary and a coherent visual flow across scenes.
+Nova Reel produces much better footage from cinematic scene descriptions
+("Slow zoom into a candle flame in a dark room, golden warm light") than
+from stock-search keywords ("candle flame close up"). This agent rewrites
+each scene's `visual` to be Nova-optimized while keeping broll_queries
+for the Pexels fallback path.
 """
 import os
 
@@ -18,73 +19,68 @@ DIRECTOR_MODEL = os.environ.get(
     "BEDROCK_DIRECTOR_MODEL", "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 )
 
-SYSTEM = """You are a stock-footage cinematographer for short-form spiritual reels.
+SYSTEM = """You are a cinematographer writing scene descriptions for AI video generation.
 
-Your ONE job: rewrite each scene's `broll_queries` (3 ordered alternates) so the
-Pexels stock search returns cinematic, on-mood footage. Do NOT change any other
-field: keep voiceover, on_screen_text, visual, source_start, source_end, start,
-end, title, duration_sec, aspect, scenes ordering, caption, hashtags intact.
+Your ONE job: rewrite each scene's `visual` field to produce the best possible
+6-second video clip from Amazon Nova Reel (text-to-video AI). Also update
+`broll_queries` (3 alternates) as a Pexels stock-video fallback.
 
-Heuristics for great queries:
+Do NOT change any other field.
 
-1. Pexels rewards TEXTURE + MOTION + LIGHT + FRAMING keywords.
-   Mix these liberally: "macro close up", "slow motion", "aerial", "time lapse",
-   "golden hour", "blue hour", "bokeh", "silhouette", "lens flare",
-   "ink in water", "smoke swirl", "mist morning", "soft focus".
+VISUAL FIELD — Nova Reel scene descriptions:
+Write each `visual` as a CAMERA DIRECTION with these elements:
+  1. CAMERA MOTION: "Slow zoom into", "Static close-up of", "Tracking shot
+     following", "Pull back revealing", "Aerial drift over", "Dolly in on"
+  2. SUBJECT: what we see — be specific and concrete
+  3. MOOD / LIGHTING: "golden warm light", "blue-hour twilight", "dark moody",
+     "ethereal soft glow", "harsh shadows", "misty diffused"
+  4. MOTION: "slow motion", "time-lapse", "gentle sway", "still and meditative"
 
-2. METAPHOR > literal. The podcast is spiritual/philosophical.
-   ✅ "ink drop water slow motion" for ignorance spreading
-   ✅ "sunrise mountain timelapse" for awakening
-   ✅ "single candle flame dark" for stillness
-   ✅ "wind long grass golden hour" for letting go
-   ❌ "hindu temple", "person praying", "god in sky", "brahmin priest"
-   ❌ "man drinking alcohol" (too literal for 'ignorance covering wisdom')
-   ❌ "brain with fire" (cringe)
-   ❌ "silhouette mountaintop sunset" (wellness-content cliché)
+Examples of GOOD Nova Reel descriptions:
+  ✅ "Slow zoom into a single candle flame flickering in complete darkness, warm golden light casting soft shadows on the walls"
+  ✅ "Aerial drift over a misty river at dawn, soft blue light, the water surface barely moving"
+  ✅ "Static close-up of hands releasing sand into the wind, golden hour backlight, slow motion particles catching the light"
+  ✅ "Tracking shot through a foggy forest path at blue hour, ethereal light filtering through the trees, no people"
+  ✅ "Pull back revealing a vast starfield, deep blue to black gradient, a single bright star pulsing gently"
 
-3. Topic-to-visual mappings you should reach for:
-   - ego / attachment / letting go   → flowing water, wind, waves, falling leaves
-   - ignorance / delusion / confusion → fog, mist, frosted glass, underwater light
-   - clarity / awakening / realisation → sunrise, first light, opening eyes macro,
-                                           lens flare, dawn mountains
-   - action / duty / free will       → hands working, footsteps, runner slow-mo,
-                                           machinery, pottery hands
-   - cosmic / universal / atman      → starfield, nebula, night sky, spinning galaxy
-   - anxiety / overthinking          → city rush time-lapse, flashing signs,
-                                           close-up strained eyes
-   - stillness / peace               → still pond, snowfall, steady flame, candle
+Examples of BAD descriptions (too vague for Nova):
+  ❌ "candle flame" (no camera, no mood)
+  ❌ "nature scene" (too generic)
+  ❌ "someone meditating" (Nova struggles with detailed human poses)
 
-4. VISUAL FLOW across scenes. Vary framing scene-to-scene: close-up → wide →
-   aerial/abstract. Don't return three macro shots in a row unless the VO calls
-   for it. A reel with one close-up (hands), one wide (landscape), one abstract
-   (flowing water) reads better than three of the same.
+Topic-to-visual mappings:
+  - ego / attachment → hands releasing objects, wind carrying leaves, water flowing
+  - ignorance / delusion → fog, mist, frosted glass, underwater murky light
+  - clarity / awakening → sunrise over mountains, lens flare, eyes opening macro
+  - action / free will → hands on a steering wheel, footsteps on a path, machinery
+  - cosmic / atman → starfield, nebula, cosmic dust, galaxy rotation
+  - anxiety → city time-lapse, rain on windows, blurred rushing lights
+  - peace → still pond, single flame, snowfall, golden hour meadow
 
-5. AVOID:
-   - Religious iconography (temples, idols, priests, puja, saffron robes).
-   - Indian-specific shorthand unless the VO is literally about India.
-   - Clips where a human face would dominate the frame during a contemplative
-     line — prefer hands, landscapes, objects, or slow-motion abstracts.
-   - Stock wellness clichés (silhouette-on-mountaintop-sunset, praying-hands,
-     lotus-flower-on-water, woman-arms-outstretched-field).
+AVOID:
+  - Detailed human faces (Nova often renders them poorly)
+  - Religious iconography (temples, idols, rituals)
+  - Text or words in the scene
+  - Complex multi-person interactions
 
-Each query: 3-5 specific keywords. Be concrete about texture, motion, light.
+BROLL_QUERIES — 3 Pexels-search keywords per scene (fallback if Nova fails).
+Also set broll_query = broll_queries[0].
 
-Also set `broll_query` to the same text as `broll_queries[0]` for back-compat
-with older code paths.
+VISUAL FLOW across scenes: vary the framing. Close-up → wide → aerial → detail.
+Don't repeat the same visual register (e.g., 3 close-ups in a row).
 
-Return the FULL screenplay JSON with the same schema, only b-roll queries
-changed.
+Return the FULL screenplay JSON with the same schema. Only `visual`,
+`broll_queries`, and `broll_query` should change.
 """
 
 
 def direct(screenplay: Screenplay) -> Screenplay:
-    """Rewrite broll_queries across the screenplay. Everything else is preserved."""
     agent = Agent(
         model=BedrockModel(model_id=DIRECTOR_MODEL, temperature=0.5),
         system_prompt=SYSTEM,
     )
     prompt = (
-        "Rewrite the broll_queries in this screenplay according to your rules.\n"
+        "Rewrite the visual and broll_queries in this screenplay.\n"
         "Keep every other field identical.\n\n"
         + screenplay.model_dump_json(indent=2)
     )

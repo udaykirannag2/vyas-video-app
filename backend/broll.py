@@ -133,36 +133,24 @@ def handler(event: dict[str, Any], _ctx) -> dict[str, Any]:
     key = _pexels_key()
     headers = {"Authorization": key}
     scene_broll: list[dict[str, Any]] = [None] * len(script["scenes"])  # type: ignore
-    nova_misses: list[tuple[int, dict[str, Any]]] = []  # (scene_index, scene)
+    pexels_fallbacks: list[tuple[int, dict[str, Any]]] = []
 
-    # Pass 1: Pexels for every scene.
-    for i, scene in enumerate(script["scenes"]):
-        queries: list[str] = scene.get("broll_queries") or []
-        if not queries and scene.get("broll_query"):
-            queries = [scene["broll_query"]]
-        scene_duration = max(1.0, float(scene.get("end", 0)) - float(scene.get("start", 0)))
+    # Pass 1: Nova Reel (PRIMARY) for every scene — generates video from the
+    # scene's `visual` direction text. Higher cost but visuals match the
+    # spiritual/metaphorical content far better than stock footage.
+    nova_scenes: list[tuple[int, dict[str, Any]]] = [
+        (i, scene) for i, scene in enumerate(script["scenes"])
+    ]
 
-        video, vf, matched = _pick_best(queries, headers, scene_duration)
-        if video and vf:
-            broll_key = f"projects/{project_id}/broll/scene_{i:02d}.mp4"
-            if _download_pexels(vf["link"], broll_key):
-                scene_broll[i] = {
-                    "index": i,
-                    "broll_key": broll_key,
-                    "broll_url": _presign(broll_key),
-                    "source": "pexels",
-                    "matched_query": matched,
-                    "pexels_id": video.get("id"),
-                }
-                continue
-        print(f"[broll] scene {i}: Pexels miss — queueing for Nova Reel")
-        nova_misses.append((i, scene))
-
-    # Pass 2: Nova Reel for the misses — fire async jobs in parallel.
-    if nova_misses:
-        print(f"[broll] firing {len(nova_misses)} Nova Reel job(s) in parallel")
-        pending: dict[int, tuple[str, str]] = {}  # index -> (invocation_arn, nova_prefix)
-        for i, scene in nova_misses:
+    if nova_scenes:
+        print(f"[broll] firing {len(nova_scenes)} Nova Reel job(s) (primary, staggered)")
+        pending: dict[int, tuple[str, str]] = {}
+        import time as _time
+        for j, (i, scene) in enumerate(nova_scenes):
+            if j > 0:
+                _time.sleep(3)  # stagger to avoid concurrency throttle
+            # Nova Reel gets the cinematic `visual` description (polished by the
+            # visual director), not the Pexels search keywords.
             prompt_text = scene.get("visual") or (scene.get("voiceover") or "")[:200]
             nova_prefix = f"tmp/nova/{project_id}/scene_{i:02d}"
             try:
@@ -210,5 +198,29 @@ def handler(event: dict[str, Any], _ctx) -> dict[str, Any]:
             for fut in as_completed(futures):
                 result = fut.result()
                 scene_broll[result["index"]] = result
+                if result.get("source") in ("nova-failed", None) and not result.get("broll_key"):
+                    idx = result["index"]
+                    pexels_fallbacks.append((idx, script["scenes"][idx]))
+
+    # Pass 2: Pexels (SECONDARY) for any scenes where Nova failed.
+    if pexels_fallbacks:
+        print(f"[broll] {len(pexels_fallbacks)} Nova miss(es) — trying Pexels fallback")
+        for i, scene in pexels_fallbacks:
+            queries: list[str] = scene.get("broll_queries") or []
+            if not queries and scene.get("broll_query"):
+                queries = [scene["broll_query"]]
+            scene_duration = max(1.0, float(scene.get("end", 0)) - float(scene.get("start", 0)))
+            video, vf, matched = _pick_best(queries, headers, scene_duration)
+            if video and vf:
+                broll_key = f"projects/{project_id}/broll/scene_{i:02d}.mp4"
+                if _download_pexels(vf["link"], broll_key):
+                    scene_broll[i] = {
+                        "index": i,
+                        "broll_key": broll_key,
+                        "broll_url": _presign(broll_key),
+                        "source": "pexels-fallback",
+                        "matched_query": matched,
+                        "pexels_id": video.get("id"),
+                    }
 
     return {**event, "scene_broll": scene_broll}

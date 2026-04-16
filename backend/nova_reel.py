@@ -16,21 +16,23 @@ _bedrock = boto3.client("bedrock-runtime")
 _s3 = boto3.client("s3")
 
 NOVA_REEL_MODEL = os.environ.get("NOVA_REEL_MODEL", "amazon.nova-reel-v1:1")
-# Portrait 9:16 for vertical reels
-DIMENSION = "720x1280"
+# Nova Reel only supports 1280x720. Remotion's BRollClip uses
+# object-fit: cover to crop the landscape clip into 9:16 portrait.
+DIMENSION = "1280x720"
 DURATION_SECONDS = 6
 FPS = 24
 
 
-def start(prompt: str, output_bucket: str, output_prefix: str) -> str:
-    """Fire an async Nova Reel job. Returns the invocationArn (used for polling).
+def start(prompt: str, output_bucket: str, output_prefix: str, *, max_retries: int = 5) -> str:
+    """Fire an async Nova Reel job with retry on throttling.
 
     Nova writes `<output_prefix>/<invocation-id>/output.mp4` into the bucket.
+    Returns the invocationArn (used for polling).
     """
     s3_uri = f"s3://{output_bucket}/{output_prefix.rstrip('/')}/"
-    resp = _bedrock.start_async_invoke(
-        modelId=NOVA_REEL_MODEL,
-        modelInput={
+    payload = {
+        "modelId": NOVA_REEL_MODEL,
+        "modelInput": {
             "taskType": "TEXT_VIDEO",
             "textToVideoParams": {"text": prompt[:512]},
             "videoGenerationConfig": {
@@ -39,9 +41,19 @@ def start(prompt: str, output_bucket: str, output_prefix: str) -> str:
                 "dimension": DIMENSION,
             },
         },
-        outputDataConfig={"s3OutputDataConfig": {"s3Uri": s3_uri}},
-    )
-    return resp["invocationArn"]
+        "outputDataConfig": {"s3OutputDataConfig": {"s3Uri": s3_uri}},
+    }
+    for attempt in range(max_retries):
+        try:
+            resp = _bedrock.start_async_invoke(**payload)
+            return resp["invocationArn"]
+        except _bedrock.exceptions.ThrottlingException:
+            if attempt == max_retries - 1:
+                raise
+            wait = (2 ** attempt) * 5  # 5, 10, 20, 40, 80 seconds
+            print(f"[nova] throttled on start, retrying in {wait}s (attempt {attempt+1})")
+            time.sleep(wait)
+    raise RuntimeError("unreachable")
 
 
 def wait(invocation_arn: str, *, timeout_sec: int = 600, poll_every: int = 10) -> dict[str, Any]:

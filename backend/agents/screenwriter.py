@@ -53,7 +53,15 @@ CONTINUITY RULES (most important — non-negotiable):
 Scene 1 MUST be the hook — the window was chosen because it opens strong.
 
 - on_screen_text: SHORT (2-5 words), shouted-capitals, for silent autoplay.
-- visual: one-sentence b-roll direction.
+- visual: one-sentence CINEMATIC scene description for AI video generation.
+  Write it as a camera direction: "Slow zoom into a single candle flame
+  flickering in a dark room" not "candle flame". Be specific about:
+    • Camera motion (slow zoom, pull back, tracking shot, static close-up)
+    • Subject (what we see)
+    • Mood/lighting (golden hour, dark moody, misty, ethereal)
+    • Motion (slow motion, time-lapse, still)
+  This feeds directly to Amazon Nova Reel — the more cinematic the
+  description, the better the generated video.
 
 B-ROLL QUERIES — 3 ordered alternates per scene.
 Think in METAPHORS not literal nouns. The podcast is spiritual/philosophical.
