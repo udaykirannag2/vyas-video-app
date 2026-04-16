@@ -25,7 +25,7 @@ INPUT: The plain text transcript of a podcast episode.
 
 YOUR JOB:
 Find 2 or 3 passages in the transcript that would each make a great
-20-35 second reel (50-90 words). For each, identify:
+reel. The clip can be 30s to 120s — let the topic dictate length. For each, identify:
 
   1. `start_phrase` — the FIRST 6-10 words of the passage, copied exactly
      from the transcript. This is where the topic BEGINS (the hook/setup).
@@ -52,7 +52,6 @@ end_phrase must be AFTER the topic's conclusion/payoff:
 
 The passage between start and end should be a COMPLETE MINI-TALK:
   - setup → development → payoff
-  - 50-90 words (20-35 seconds spoken)
   - Self-contained: someone who hears ONLY this clip understands the point
   - Ends AFTER the host lands the conclusion, not mid-analogy
 
@@ -62,8 +61,16 @@ Also return:
   - summary: 2-3 sentence description
   - verse_ref: Bhagavad Gita verse reference
   - why_it_works: resonance with 15-35 audience
-  - target_length_sec: estimated spoken duration
+  - target_length_sec: estimated spoken duration (let the topic dictate length)
   - rank: 1 = best
+
+LENGTH: Let the topic dictate the clip length. A complete topic might be
+30 seconds or 120 seconds — both are fine. DO NOT artificially shorten a
+passage to hit a target. If the host takes 90 seconds to make a complete
+point (setup → development → payoff), the clip should be 90 seconds.
+  - Minimum: ~20 seconds (shorter than that isn't enough for a reel)
+  - Maximum: ~120 seconds (YouTube Shorts caps at 3 min, IG Reels at 90s)
+  - Sweet spot: whatever the topic naturally needs
 
 Set window_start, window_end to 0 (code fills them). Set window_text to ""
 (code fills it). Set quotes to empty list (deprecated).

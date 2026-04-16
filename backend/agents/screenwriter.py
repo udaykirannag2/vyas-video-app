@@ -27,8 +27,11 @@ You also receive the full timed transcript so you can find the exact segment
 boundaries within the window.
 
 YOUR JOB:
-Split the window into 4-6 scenes at natural sentence or clause boundaries.
+Split the window into scenes at natural sentence or clause boundaries.
 Each scene's voiceover is a verbatim sub-slice of the window.
+
+The reel length = the window length. If the window is 80 seconds, the reel
+is 80 seconds. Do NOT shorten it.
 
 CONTINUITY RULES (most important — non-negotiable):
 1. Scenes are SEQUENTIAL and BACK-TO-BACK within the window.
@@ -38,9 +41,12 @@ CONTINUITY RULES (most important — non-negotiable):
    NO GAPS between scenes. NO JUMPS to a different part of the podcast.
 2. Each scene's voiceover = verbatim text from source_start to source_end.
    Character-for-character from the transcript. No trimming, no reordering.
-3. Per-scene source span: target 3-6 seconds, max 8 seconds.
-   If a sentence runs 12 seconds, split at a clause boundary (comma, "and",
-   "but", pause) into two scenes.
+3. Per-scene source span: target 5-12 seconds. Max 15 seconds if the host is
+   mid-sentence and splitting would sound unnatural.
+   Roughly 1 scene per 8-12 seconds of audio:
+     30s window → 3-5 scenes
+     60s window → 5-8 scenes
+     90s window → 8-12 scenes
 4. Reel timeline must equal source timeline:
    scene.end - scene.start == scene.source_end - scene.source_start
 

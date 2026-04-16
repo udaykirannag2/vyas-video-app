@@ -400,10 +400,18 @@ def _run_ideation(episode_id: int) -> None:
                 idea.target_length_sec = int(round(we - ws))
                 if clean_summary:
                     idea.summary = clean_summary
-                # Restore clean hook (strip the START_PHRASE: encoding)
                 if "START_PHRASE:" in idea.hook:
                     idea.hook = start_phrase
-                print(f"[align] idea {idea.rank}: {ws:.1f}-{we:.1f}s ({we-ws:.0f}s)")
+
+                # Post-alignment: extend if window ends on a dangling word
+                item_tmp = idea.model_dump()
+                item_tmp = _extend_window_to_sentence_end(item_tmp, segments)
+                idea.window_start = float(item_tmp["window_start"])
+                idea.window_end = float(item_tmp["window_end"])
+                idea.window_text = item_tmp["window_text"]
+                idea.target_length_sec = int(round(idea.window_end - idea.window_start))
+
+                print(f"[align] idea {idea.rank}: {idea.window_start:.1f}-{idea.window_end:.1f}s ({idea.window_end-idea.window_start:.0f}s)")
             except ValueError as e:
                 print(f"[align] idea {idea.rank}: alignment failed: {e}")
 
@@ -743,21 +751,19 @@ def _align_scene_timelines(screenplay: Screenplay) -> Screenplay:
     over_cap = []
     for i, scene in enumerate(screenplay.scenes):
         if scene.source_start is None or scene.source_end is None:
-            # Bug-guard scene with no source span — keep whatever duration the
-            # screenwriter gave us (Polly synth path).
             dur = max(0.5, float(scene.end) - float(scene.start))
         else:
             dur = max(0.5, float(scene.source_end) - float(scene.source_start))
-        if dur > 9:
+        if dur > 16:
             over_cap.append((i + 1, round(dur, 1)))
         scene.start = round(t, 2)
         scene.end = round(t + dur, 2)
         t += dur
     screenplay.duration_sec = int(round(t))
     if over_cap:
-        print(f"[align] scenes over 8s cap: {over_cap} — total reel {t:.1f}s")
-    if t > 45:
-        print(f"[align] ⚠ reel total {t:.1f}s exceeds 45s target — consider revising")
+        print(f"[align] scenes over 15s cap: {over_cap} — total reel {t:.1f}s")
+    if t > 130:
+        print(f"[align] ⚠ reel total {t:.1f}s exceeds 130s — may be too long for Shorts/Reels")
 
     # Continuity check: scenes should be sequential in source audio.
     for i in range(1, len(screenplay.scenes)):

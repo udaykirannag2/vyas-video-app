@@ -60,7 +60,7 @@ def align_by_phrases(
     end_phrase: str,
     segments: list[dict[str, Any]],
     *,
-    max_duration: float = 50.0,
+    max_duration: float = 130.0,
 ) -> tuple[float, float, str]:
     """Find segments between start_phrase and end_phrase.
 
