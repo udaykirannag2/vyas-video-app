@@ -728,6 +728,15 @@ def _script_response(item: dict[str, Any]) -> dict[str, Any]:
         scene_audio = json.loads(raw)
     else:
         scene_audio = raw or []
+    # Regenerate presigned URLs on every read — stored URLs expire after 2h.
+    for entry in scene_audio:
+        key = entry.get("audio_key")
+        if key:
+            entry["audio_url"] = _s3.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": BUCKET, "Key": key},
+                ExpiresIn=60 * 60 * 2,
+            )
     return {
         **sp,
         "scene_audio": scene_audio,
