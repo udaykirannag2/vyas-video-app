@@ -50,9 +50,30 @@ CONTINUITY RULES (most important — non-negotiable):
 4. Reel timeline must equal source timeline:
    scene.end - scene.start == scene.source_end - scene.source_start
 
-Scene 1 MUST be the hook — the window was chosen because it opens strong.
+BEAT TYPES — assign one to every scene. This drives visuals and pacing.
+The idea includes hook_line, twist_line, and payoff_line — use them to decide:
+
+  hook:   The opening pattern interrupt. Bold claim or question. Short (3-5s).
+          The on-screen text should be the idea's hook_line (compressed to 2-5 words).
+          Visual register: unexpected, high-contrast, tight framing, dark-to-light.
+  setup:  Grounding context — "here's the situation." Medium (5-12s).
+          Visual register: warm, wide establishing, familiar objects.
+  build:  Tension/development — "but here's the thing." Medium (5-12s).
+          Visual register: movement, tracking shots, shadows growing.
+  twist:  The reframe — the idea's twist_line. Short, punchy (3-6s).
+          Visual register: transformation, burst of light/color, dramatic reveal.
+  payoff: Resolution — the idea's payoff_line. Medium, warm (5-10s).
+          Visual register: expansive, calm, golden hour, wide pullback.
+
+Scene 1 is always beat_type="hook". The twist_line scene is "twist". The
+payoff_line scene is "payoff". Everything else is "setup" or "build".
+
+NOTE: the pipeline will rewrite scene.start/end to match source audio duration.
+Don't worry about getting timeline math right — focus on BEAT ASSIGNMENT,
+ON-SCREEN TEXT, and VISUAL DIRECTION.
 
 - on_screen_text: SHORT (2-5 words), shouted-capitals, for silent autoplay.
+  For hook scenes, use the hook_line compressed. For twist, emphasize the insight.
 - visual: one-sentence METAPHORICAL cinematic scene description for Amazon
   Nova Reel (AI text-to-video).
 

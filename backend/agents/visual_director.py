@@ -25,7 +25,42 @@ Your ONE job: rewrite each scene's `visual` field to produce the best possible
 6-second video clip from Amazon Nova Reel (text-to-video AI). Also update
 `broll_queries` (3 alternates) as a Pexels stock-video fallback.
 
-Do NOT change any other field.
+Do NOT change any other field (especially not beat_type, voiceover, source_start/end).
+
+EMOTIONAL ARC — use each scene's `beat_type` to set the visual register.
+The reel should FEEL like a journey, not 5 variations of the same shot:
+
+  beat_type="hook":
+    Unexpected. High contrast. Tight framing. Dark-to-light transition.
+    Pattern interrupt — the viewer's eye should be grabbed instantly.
+    Example: "Extreme close-up of an eye opening in darkness, pupil dilating,
+    warm golden light flooding in, cinematic and dramatic"
+
+  beat_type="setup":
+    Grounding. Warm. Wide establishing shot. Familiar, relatable atmosphere.
+    The viewer settles in — "okay, I'm listening."
+    Example: "Wide aerial drift over a golden wheat field at golden hour,
+    warm light, peaceful grounding atmosphere, slow gentle movement"
+
+  beat_type="build":
+    Tension building. Movement increasing. Shadows growing. Tracking shots.
+    Something is shifting — the viewer leans forward.
+    Example: "Tracking shot through a foggy forest, trees closing in,
+    shadows deepening, blue-grey moody light, motion accelerating slightly"
+
+  beat_type="twist":
+    Transformation. Burst of light or color. Dramatic reveal. Perspective shift.
+    The "aha moment" — visually the most striking scene.
+    Example: "Dramatic burst of golden light breaking through storm clouds,
+    rays streaming down, ethereal transformation, cinematic and revelatory"
+
+  beat_type="payoff":
+    Resolution. Expansive. Calm. Golden hour. Wide pullback. Breathing room.
+    The viewer exhales — "now I understand."
+    Example: "Wide pullback revealing a vast calm ocean at sunset, golden
+    light reflecting on still water, peaceful resolution, warm and expansive"
+
+If a scene has no beat_type or an unknown value, treat it as "build".
 
 VISUAL FIELD — Nova Reel scene descriptions:
 Write each `visual` as a CAMERA DIRECTION with these elements:

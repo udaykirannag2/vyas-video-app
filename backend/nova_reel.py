@@ -23,22 +23,52 @@ DURATION_SECONDS = 6
 FPS = 24
 
 
-_SPIRITUAL_PREFIX = (
-    "A cinematic, meditative, spiritual short film clip. "
-    "Metaphorical and contemplative — not literal or religious. "
-    "No text, no faces, no religious symbols. "
-    "Smooth, slow, dreamlike motion. Warm or ethereal lighting. "
-)
+_BEAT_PREFIXES = {
+    "hook": (
+        "A cinematic, dramatic, spiritual short film clip. "
+        "High contrast. Pattern interrupt. Dark to light transition. "
+        "Tight framing. No text, no faces, no religious symbols. "
+    ),
+    "setup": (
+        "A cinematic, warm, grounding spiritual short film clip. "
+        "Wide establishing shot. Familiar, relatable atmosphere. "
+        "Smooth slow motion. No text, no faces, no religious symbols. "
+    ),
+    "build": (
+        "A cinematic, meditative, spiritual short film clip. "
+        "Motion building gradually. Shadows and movement. Contemplative. "
+        "Dreamlike. No text, no faces, no religious symbols. "
+    ),
+    "twist": (
+        "A cinematic, revelatory, spiritual short film clip. "
+        "Burst of light or color. Dramatic transformation. Ethereal. "
+        "Perspective shift. No text, no faces, no religious symbols. "
+    ),
+    "payoff": (
+        "A cinematic, peaceful, resolved spiritual short film clip. "
+        "Warm golden light. Expansive calm. Wide pullback. Serene. "
+        "No text, no faces, no religious symbols. "
+    ),
+}
+_DEFAULT_PREFIX = _BEAT_PREFIXES["build"]
 
 
-def start(prompt: str, output_bucket: str, output_prefix: str, *, max_retries: int = 5) -> str:
+def start(
+    prompt: str,
+    output_bucket: str,
+    output_prefix: str,
+    *,
+    beat_type: str = "build",
+    max_retries: int = 5,
+) -> str:
     """Fire an async Nova Reel job with retry on throttling.
 
-    Prepends a spiritual/metaphorical style prefix to every prompt so Nova
-    generates contemplative, atmospheric clips instead of literal or generic ones.
+    Prepends a beat-specific spiritual prefix so Nova matches the emotional
+    register of each scene (hook=dramatic, payoff=peaceful, etc.).
     """
     s3_uri = f"s3://{output_bucket}/{output_prefix.rstrip('/')}/"
-    full_prompt = (_SPIRITUAL_PREFIX + prompt)[:512]
+    prefix = _BEAT_PREFIXES.get(beat_type, _DEFAULT_PREFIX)
+    full_prompt = (prefix + prompt)[:512]
     payload = {
         "modelId": NOVA_REEL_MODEL,
         "modelInput": {

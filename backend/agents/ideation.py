@@ -57,20 +57,21 @@ The passage between start and end should be a COMPLETE MINI-TALK:
 
 Also return:
   - title: punchy reel title (max 60 chars)
-  - hook: the first 3 seconds of voiceover
-  - summary: 2-3 sentence description
-  - verse_ref: Bhagavad Gita verse reference
-  - why_it_works: resonance with 15-35 audience
   - target_length_sec: estimated spoken duration (let the topic dictate length)
   - rank: 1 = best
 
-LENGTH: Let the topic dictate the clip length. A complete topic might be
-30 seconds or 120 seconds — both are fine. DO NOT artificially shorten a
-passage to hit a target. If the host takes 90 seconds to make a complete
-point (setup → development → payoff), the clip should be 90 seconds.
-  - Minimum: ~20 seconds (shorter than that isn't enough for a reel)
-  - Maximum: ~120 seconds (YouTube Shorts caps at 3 min, IG Reels at 90s)
-  - Sweet spot: whatever the topic naturally needs
+NARRATIVE ARC — for each idea, also identify these lines from the passage:
+  - hook_line: the single most attention-grabbing line. This becomes the
+    pattern-interrupt text overlaid on scene 1. Pick the boldest claim,
+    sharpest question, or most counterintuitive statement.
+  - twist_line: the key insight / reframe moment — "the aha." The moment
+    the listener's mental model shifts.
+  - payoff_line: the conclusion / takeaway — what the listener walks away
+    with. Should feel like a resolution.
+  Copy these EXACTLY from the transcript (verbatim).
+
+LENGTH: Let the topic dictate the clip length (30-120 seconds). Complete
+topics can be long — don't artificially shorten.
 
 Set window_start, window_end to 0 (code fills them). Set window_text to ""
 (code fills it). Set quotes to empty list (deprecated).

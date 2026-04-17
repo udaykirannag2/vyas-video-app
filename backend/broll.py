@@ -152,9 +152,10 @@ def handler(event: dict[str, Any], _ctx) -> dict[str, Any]:
             # Nova Reel gets the cinematic `visual` description (polished by the
             # visual director), not the Pexels search keywords.
             prompt_text = scene.get("visual") or (scene.get("voiceover") or "")[:200]
+            beat = scene.get("beat_type", "build")
             nova_prefix = f"tmp/nova/{project_id}/scene_{i:02d}"
             try:
-                arn = nova_reel.start(prompt_text, BUCKET, nova_prefix)
+                arn = nova_reel.start(prompt_text, BUCKET, nova_prefix, beat_type=beat)
                 pending[i] = (arn, nova_prefix)
                 print(f"[broll] nova start scene {i}: {arn}")
             except Exception as e:

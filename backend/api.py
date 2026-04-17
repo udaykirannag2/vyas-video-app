@@ -544,7 +544,11 @@ def _idea_view(i: dict[str, Any]) -> dict[str, Any]:
         "window_start": float(i.get("window_start", 0)),
         "window_end": float(i.get("window_end", 0)),
         "window_text": i.get("window_text", ""),
-        # Deprecated scattered quotes (kept for old data)
+        # Narrative arc annotations
+        "hook_line": i.get("hook_line", ""),
+        "twist_line": i.get("twist_line", ""),
+        "payoff_line": i.get("payoff_line", ""),
+        # Deprecated
         "quotes": quotes,
     }
 
@@ -628,6 +632,9 @@ def _load_idea(ep_id: int, rank: int) -> Idea:
         window_start=float(item.get("window_start", 0)),
         window_end=float(item.get("window_end", 0)),
         window_text=item.get("window_text", ""),
+        hook_line=item.get("hook_line", ""),
+        twist_line=item.get("twist_line", ""),
+        payoff_line=item.get("payoff_line", ""),
         quotes=quotes,
     )
 
@@ -801,7 +808,16 @@ def _run_script_task(
         if kind == "generate":
             idea = _load_idea(episode_id, rank)
             timed = _load_timed_transcript(episode_id)
-            screenplay = write_script(idea.model_dump(), timed)
+            # Fix: decode the START_PHRASE/END_PHRASE encoding before passing
+            # to the screenwriter — it needs clean hook/summary, not the
+            # encoded format used for alignment.
+            idea_dict = idea.model_dump()
+            start_ph, end_ph, clean_sum = parse_phrases(idea_dict)
+            if start_ph:
+                idea_dict["hook"] = start_ph
+            if clean_sum:
+                idea_dict["summary"] = clean_sum
+            screenplay = write_script(idea_dict, timed)
         elif kind == "revise":
             current = _latest_ready_script(episode_id, rank)
             if not current:
