@@ -36,10 +36,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 from pydantic import BaseModel
 
-from agents.ideation import generate_ideas, parse_phrases
+from agents.segment_detector import detect_segments
+from agents.clip_scorer import score_clips
 from agents.screenwriter import write_script, revise_script
 from agents.visual_director import direct as direct_visuals
-from align import align_by_phrases, align_passage
+from transcript_cleanup import cleanup as cleanup_transcript, segments_for_range
 from audio_slice import slice_scenes
 from models import Idea, Screenplay
 
@@ -375,47 +376,66 @@ def _run_ideation(episode_id: int) -> None:
         meta = _get_meta(episode_id)
         if not meta.get("transcript_key"):
             raise RuntimeError("transcript missing")
-        # Two-pass ideation:
-        # Pass 1 — LLM reads PLAIN TEXT, identifies topic boundaries by meaning.
-        plain = _load_transcript(episode_id)
-        ideas = generate_ideas(plain)
+        # 3-step ideation pipeline:
+        #   Step 1: Transcript cleanup (code — remove filler, preserve timestamps)
+        #   Step 2: Semantic segment detection (LLM — find topic boundaries)
+        #   Step 3: Candidate clip scoring (LLM — rank + annotate arc)
 
-        # Pass 2 — Code aligns start/end phrases to timed-transcript timestamps.
         timed = _load_timed_transcript(episode_id)
-        segments = _parse_timed_segments(timed)
-        for idea in ideas.ideas:
-            idea_dict = idea.model_dump()
-            start_phrase, end_phrase, clean_summary = parse_phrases(idea_dict)
-            print(f"[align] idea {idea.rank}: start='{start_phrase[:50]}' end='{end_phrase[:50]}'")
-            try:
-                if start_phrase and end_phrase:
-                    ws, we, matched = align_by_phrases(start_phrase, end_phrase, segments)
-                else:
-                    # Fallback: try full-passage match on window_text
-                    passage = idea.window_text or idea.hook or ""
-                    ws, we, matched = align_passage(passage, segments)
-                idea.window_start = ws
-                idea.window_end = we
-                idea.window_text = matched
-                idea.target_length_sec = int(round(we - ws))
-                if clean_summary:
-                    idea.summary = clean_summary
-                if "START_PHRASE:" in idea.hook:
-                    idea.hook = start_phrase
+        raw_segments = _parse_timed_segments(timed)
 
-                # Post-alignment: extend if window ends on a dangling word
-                item_tmp = idea.model_dump()
-                item_tmp = _extend_window_to_sentence_end(item_tmp, segments)
-                idea.window_start = float(item_tmp["window_start"])
-                idea.window_end = float(item_tmp["window_end"])
-                idea.window_text = item_tmp["window_text"]
-                idea.target_length_sec = int(round(idea.window_end - idea.window_start))
+        # Step 1: Clean transcript for LLM analysis. Preserves timestamp mapping.
+        clean_segs, clean_text, seg_idx = cleanup_transcript(raw_segments)
+        print(f"[ideation] step 1 cleanup: {len(raw_segments)} raw → {len(clean_segs)} clean segments")
 
-                print(f"[align] idea {idea.rank}: {idea.window_start:.1f}-{idea.window_end:.1f}s ({idea.window_end-idea.window_start:.0f}s)")
-            except ValueError as e:
-                print(f"[align] idea {idea.rank}: alignment failed: {e}")
+        # Step 2: LLM detects semantic topic boundaries using segment indices.
+        topic_segments = detect_segments(clean_text)
+        print(f"[ideation] step 2 detect: {len(topic_segments)} topic candidates")
 
-        for idea in ideas.ideas:
+        # Build candidate list with full text + timestamps for scoring.
+        candidates = []
+        for i, ts in enumerate(topic_segments):
+            s_idx = int(ts["start_seg"])
+            e_idx = int(ts["end_seg"])
+            audio_start, audio_end, original_text = segments_for_range(clean_segs, s_idx, e_idx)
+            candidates.append({
+                "clip_id": i,
+                "topic": ts.get("topic", ""),
+                "start_seg": s_idx,
+                "end_seg": e_idx,
+                "audio_start": audio_start,
+                "audio_end": audio_end,
+                "duration_sec": round(audio_end - audio_start),
+                "text": original_text,
+            })
+
+        # Step 3: LLM scores and ranks candidates, annotates narrative arc.
+        scored = score_clips(candidates)
+        print(f"[ideation] step 3 score: {len(scored)} clips selected")
+
+        # Build Idea objects from scored clips.
+        from models import Idea as IdeaModel
+        ideas_list = []
+        for sc in scored:
+            cid = int(sc["clip_id"])
+            cand = candidates[cid] if cid < len(candidates) else candidates[0]
+            ideas_list.append(IdeaModel(
+                title=sc.get("title", "Untitled"),
+                hook=sc.get("hook_line", "")[:200],
+                summary=sc.get("summary", ""),
+                verse_ref=sc.get("verse_ref", ""),
+                target_length_sec=cand["duration_sec"],
+                why_it_works=sc.get("why_it_works", ""),
+                rank=int(sc.get("rank", 1)),
+                window_start=cand["audio_start"],
+                window_end=cand["audio_end"],
+                window_text=cand["text"],
+                hook_line=sc.get("hook_line", ""),
+                twist_line=sc.get("twist_line", ""),
+                payoff_line=sc.get("payoff_line", ""),
+            ))
+
+        for idea in ideas_list:
             item = idea.model_dump()
             item["quotes"] = json.dumps(item.get("quotes", []))
             # DDB rejects Python float; convert to Decimal recursively.
@@ -808,16 +828,8 @@ def _run_script_task(
         if kind == "generate":
             idea = _load_idea(episode_id, rank)
             timed = _load_timed_transcript(episode_id)
-            # Fix: decode the START_PHRASE/END_PHRASE encoding before passing
-            # to the screenwriter — it needs clean hook/summary, not the
-            # encoded format used for alignment.
-            idea_dict = idea.model_dump()
-            start_ph, end_ph, clean_sum = parse_phrases(idea_dict)
-            if start_ph:
-                idea_dict["hook"] = start_ph
-            if clean_sum:
-                idea_dict["summary"] = clean_sum
-            screenplay = write_script(idea_dict, timed)
+            # hook and summary are now clean (set by clip_scorer, not encoded).
+            screenplay = write_script(idea.model_dump(), timed)
         elif kind == "revise":
             current = _latest_ready_script(episode_id, rank)
             if not current:
