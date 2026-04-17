@@ -23,34 +23,18 @@ DURATION_SECONDS = 6
 FPS = 24
 
 
+# Per-beat CAMERA STYLE prefix. Grounded in filmable reality.
+# NEVER uses abstract words (metaphorical, spiritual, dreamlike, ethereal,
+# contemplative) — Nova turns those into generic fog/particles.
+# NEVER uses negation (no, not, without) — Nova ignores negation.
 _BEAT_PREFIXES = {
-    "hook": (
-        "A cinematic, dramatic, spiritual short film clip. "
-        "High contrast. Pattern interrupt. Dark to light transition. "
-        "Tight framing. No text, no faces, no religious symbols. "
-    ),
-    "setup": (
-        "A cinematic, warm, grounding spiritual short film clip. "
-        "Wide establishing shot. Familiar, relatable atmosphere. "
-        "Smooth slow motion. No text, no faces, no religious symbols. "
-    ),
-    "build": (
-        "A cinematic, meditative, spiritual short film clip. "
-        "Motion building gradually. Shadows and movement. Contemplative. "
-        "Dreamlike. No text, no faces, no religious symbols. "
-    ),
-    "twist": (
-        "A cinematic, revelatory, spiritual short film clip. "
-        "Burst of light or color. Dramatic transformation. Ethereal. "
-        "Perspective shift. No text, no faces, no religious symbols. "
-    ),
-    "payoff": (
-        "A cinematic, peaceful, resolved spiritual short film clip. "
-        "Warm golden light. Expansive calm. Wide pullback. Serene. "
-        "No text, no faces, no religious symbols. "
-    ),
+    "hook": "Cinematic short film. High contrast dramatic side-lighting. Tight framing. ",
+    "setup": "Cinematic short film. Warm even lighting. Wide establishing shot. Slow steady camera. ",
+    "build": "Cinematic short film. Gradual shadow movement. Tracking camera. Building energy. ",
+    "twist": "Cinematic short film. Sudden bright light burst. Dramatic rack focus. Quick framing change. ",
+    "payoff": "Cinematic short film. Warm golden hour backlight. Wide pullback. Calm steady composition. ",
 }
-_DEFAULT_PREFIX = _BEAT_PREFIXES["build"]
+_DEFAULT_PREFIX = "Cinematic short film. Warm natural lighting. Steady camera. "
 
 
 def start(

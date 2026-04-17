@@ -64,16 +64,43 @@ For each shot, provide:
 
 SHOT VARIATION within a beat:
 - Vary framing: if shot 1 is wide, shot 2 should be close-up or detail.
-- Vary visual_mode: literal → hybrid → metaphorical progression within a beat.
 - Vary camera_movement: don't repeat the same motion 3 times.
 - First shot of beat 1 (the hook) should be the most striking visual.
-- Later beats can trend more metaphorical as the reel builds.
 
-VISUAL PRINCIPLES (same as before):
-- METAPHORS not literals. If VO says "car" → show flowing energy, not a car.
-- Spiritual, contemplative, cinematic. "Terrence Malick meets Alan Watts."
-- NO faces, NO religious symbols, NO text in frame.
-- Each visual MUST include: camera motion, subject, lighting/mood.
+VISUAL PROMPT RULES — this is critical for Nova Reel quality:
+Write each shot's `visual` as a LITERAL, CAMERA-READY, PHYSICALLY FILMABLE
+description. The shot MUST match what the host is actually saying.
+
+Format: [SHOT TYPE] [SUBJECT doing ACTION] in [ENVIRONMENT], [LIGHTING], [CAMERA]
+
+If the host says "a bright person drinks alcohol" → show a hand lifting a
+glass, amber liquid catching the light, warm overhead lighting, slow dolly in.
+If the host says "a car on autopilot" → show hands gripping a steering
+wheel, dashboard lights glowing, tight close-up, static camera.
+If the host says "electricity powers the Tesla" → show a charging cable
+plugged into a wall, a small LED indicator glowing, ambient warm light.
+
+The meaning comes from HOW it's filmed (framing, lighting, pacing), not
+from replacing the subject with abstract imagery.
+
+DO NOT use words like: metaphorical, symbolic, surreal, abstract, contemplative,
+spiritual, dreamlike, ethereal, meditative — Nova treats these as "generic fog."
+DO NOT use negation: "no faces", "without people" — Nova ignores negation.
+
+GOOD:
+  ✅ "Medium shot of a hand pouring amber liquid into a glass on a dark
+     wooden table, warm overhead tungsten light, static camera"
+  ✅ "Close-up of a coiled rope on stone with one beam of sunlight
+     revealing the fibers, warm golden light, slow dolly in"
+  ✅ "Wide shot of an empty car interior, dashboard lights glowing
+     blue-green in darkness, slow zoom toward the steering wheel"
+  ✅ "Extreme close-up of an eye opening, warm side-light casting half
+     the face in shadow, static camera"
+
+BAD (Nova generates garbage from these):
+  ❌ "A metaphorical representation of ignorance covering wisdom"
+  ❌ "Contemplative spiritual atmosphere, dreamlike and meditative"
+  ❌ "Ink dissolving in water symbolizing knowledge fading"
 
 Caption: 1-2 sentences + CTA. Hashtags: 5-8 broad + niche.
 

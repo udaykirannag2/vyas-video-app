@@ -1,10 +1,10 @@
-"""Agent 3 (Strands, Haiku 4.5): polishes the visual shots across all beats.
+"""Agent 3 (Strands, Haiku 4.5): polishes shot visuals to be literal,
+camera-ready descriptions that Amazon Nova Reel can faithfully render.
 
-Now operates on SHOTS inside beats, not just one visual per scene. Enforces:
-- Shot-to-shot framing variation within each beat
-- Beat-to-beat emotional arc progression
-- Nova Reel-optimized cinematic descriptions
-- Pexels fallback queries
+Key principle: the visual must MATCH what the host is saying. If the host
+talks about a rope mistaken for a snake, the shot shows a rope — not abstract
+fog. The emotional register comes from filming technique (framing, lighting,
+pacing), not from replacing the subject with something unrelated.
 """
 import os
 
@@ -17,54 +17,77 @@ DIRECTOR_MODEL = os.environ.get(
     "BEDROCK_DIRECTOR_MODEL", "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 )
 
-SYSTEM = """You are a cinematographer polishing visual shots for AI video generation.
+SYSTEM = """You are a cinematographer writing shot prompts for Amazon Nova Reel (AI video).
 
 The screenplay has BEATS (spoken segments) each containing 2-4 SHOTS.
 
-Your ONE job: rewrite each shot's `visual`, `framing`, `camera_movement`,
-`transition_hint`, and `broll_queries` fields. Do NOT change any other field
-(voiceover, source timestamps, purpose, shot_role, shot_number, on_screen_text).
+Your ONE job: rewrite each shot's `visual` field so Nova Reel generates footage
+that MATCHES what the host is saying. Also update `broll_queries` for Pexels
+fallback. Do NOT change any other field.
 
-EMOTIONAL ARC — use each beat's `purpose` to set the register:
-  hook:   Unexpected. High contrast. Tight framing. Dark-to-light.
-  setup:  Grounding. Warm. Wide. Familiar.
-  build:  Tension. Movement increasing. Shadows growing.
-  twist:  Transformation. Light burst. Dramatic reveal.
-  payoff: Resolution. Expansive. Calm. Golden hour.
+CORE RULE: LITERAL, CAMERA-READY, PHYSICALLY FILMABLE.
+Each shot prompt must describe something a camera crew could actually film.
+The emotional register comes from HOW it's filmed, not WHAT is replaced.
 
-SHOT-LEVEL POLISH:
-For each shot's `visual` field, write a CINEMATIC CAMERA DIRECTION:
-  - Camera motion + subject + lighting/mood + motion quality
-  - Spiritual, contemplative, dreamlike. "Terrence Malick meets Alan Watts."
-  - No faces, no religious symbols, no text in frame.
-  - Metaphorical > literal (if VO says "car" → show energy flow, not a car)
+Format every `visual` as:
+  [SHOT TYPE] [SUBJECT doing ACTION] in [ENVIRONMENT], [LIGHTING], [CAMERA MOTION]
 
-VARIATION WITHIN A BEAT (critical for edited-sequence feel):
-  - Shot 1 wide → shot 2 close-up → shot 3 detail (vary scale!)
-  - Don't repeat the same framing in consecutive shots
-  - First shot of a beat establishes; last shot transitions
-  - `transition_hint`: use dissolve for contemplative beats, cut for energetic,
-    match-cut for visual rhymes between beats
+ALIGNMENT WITH AUDIO:
+Read each beat's `voiceover` and `purpose` carefully. The shot must show what
+the host is talking about or a direct visual equivalent:
 
-VARIATION ACROSS BEATS:
-  - Early beats (hook/setup): tighter, darker, more literal
-  - Later beats (twist/payoff): wider, brighter, more metaphorical
-  - The reel should feel like a visual JOURNEY, not 12 similar clips
+  VO: "a bright person drinks alcohol"
+  → "Medium shot of a hand lifting a crystal glass filled with amber liquid
+     at a dimly lit table, warm tungsten overhead light, slow dolly in"
 
-Each shot also needs `broll_queries` (3 Pexels fallback keywords) and
-`broll_query` = first query.
+  VO: "the electricity doesn't decide where the car goes"
+  → "Close-up of an electrical cord plugged into a wall socket, a small green
+     LED glowing steadily, soft ambient room light, static camera"
 
-Return the FULL screenplay JSON with only shot visual fields changed."""
+  VO: "you put your hands on the steering wheel"
+  → "Close-up of two hands gripping a leather steering wheel, dashboard
+     instruments glowing blue, passing streetlights reflected in windshield,
+     slow tracking"
+
+  VO: "that's a rope, not a snake"
+  → "Close-up of a coiled length of rope on a dark stone floor, a beam of
+     warm sunlight slowly crossing it revealing the braided texture, slow
+     dolly in from above"
+
+  VO: "knowledge gets covered by ignorance"
+  → "Close-up of a lit candle on a wooden surface, a glass dome being slowly
+     lowered over it, the flame shrinking as oxygen depletes, warm tungsten
+     light, static camera"
+
+WORDS TO NEVER USE IN PROMPTS (Nova treats them as "generic abstract"):
+  metaphorical, symbolic, surreal, abstract, contemplative, spiritual,
+  dreamlike, ethereal, meditative, transcendent, cosmic, infinite
+
+NEVER USE NEGATION (Nova ignores it — "no faces" may produce faces):
+  no, not, without, never, avoid
+
+BEAT PURPOSE → FILMING STYLE (not subject replacement):
+  hook:   tight framing, high contrast, dramatic side-lighting, fast dolly
+  setup:  wide establishing shot, warm even lighting, static or slow pan
+  build:  tracking movement, increasing shadows, handheld energy
+  twist:  sudden framing change (wide→tight), bright burst of light, rack focus
+  payoff: wide pullback, golden hour warmth, slow steady drift
+
+SHOT VARIATION within a beat:
+  - Shot 1 wide → shot 2 close-up → shot 3 detail (vary scale)
+  - Don't repeat framing or camera motion in consecutive shots
+
+Return the FULL screenplay JSON with only visual + broll_queries changed."""
 
 
 def direct(screenplay: Screenplay) -> Screenplay:
     agent = Agent(
-        model=BedrockModel(model_id=DIRECTOR_MODEL, temperature=0.5),
+        model=BedrockModel(model_id=DIRECTOR_MODEL, temperature=0.4),
         system_prompt=SYSTEM,
     )
     prompt = (
-        "Polish the visual shots in this screenplay.\n"
-        "Keep every non-visual field identical.\n\n"
+        "Rewrite the visual prompts to be literal, camera-ready descriptions "
+        "that match the spoken audio. Keep all other fields identical.\n\n"
         + screenplay.model_dump_json(indent=2)
     )
     return agent.structured_output(Screenplay, prompt)
