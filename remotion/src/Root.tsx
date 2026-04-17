@@ -27,5 +27,4 @@ export const Root: React.FC = () => {
   );
 };
 
-// schema placeholder (Remotion types want a schema generic; we rely on ReelProps)
 const schemaStub = undefined as any;

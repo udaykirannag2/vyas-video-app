@@ -772,46 +772,37 @@ def _with_visual_director(screenplay: Screenplay) -> Screenplay:
         return screenplay
 
 
-def _align_scene_timelines(screenplay: Screenplay) -> Screenplay:
-    """Force reel timeline to equal source spans, scene by scene.
+def _align_beat_timelines(screenplay: Screenplay) -> Screenplay:
+    """Force reel timeline to equal source spans, beat by beat.
 
-    Strict-verbatim means we slice the FULL source span for each scene's audio.
-    If the reel timeline (scene.start/end) is shorter than that span, Remotion
-    cuts the audio off mid-sentence. This normalizer rewrites each scene's
-    start/end so they match the source span duration exactly, and lays scenes
-    back-to-back from 0. Total duration_sec is updated to match.
-
-    Idempotent: re-running on aligned data is a no-op.
+    Also validates shot durations tile across each beat's duration.
     """
     t = 0.0
-    over_cap = []
-    for i, scene in enumerate(screenplay.scenes):
-        if scene.source_start is None or scene.source_end is None:
-            dur = max(0.5, float(scene.end) - float(scene.start))
+    for i, beat in enumerate(screenplay.beats):
+        if beat.source_start is None or beat.source_end is None:
+            dur = max(0.5, float(beat.end) - float(beat.start))
         else:
-            dur = max(0.5, float(scene.source_end) - float(scene.source_start))
-        if dur > 16:
-            over_cap.append((i + 1, round(dur, 1)))
-        scene.start = round(t, 2)
-        scene.end = round(t + dur, 2)
+            dur = max(0.5, float(beat.source_end) - float(beat.source_start))
+        beat.start = round(t, 2)
+        beat.end = round(t + dur, 2)
+        # Normalize shot durations to tile across beat duration.
+        if beat.shots:
+            shot_total = sum(s.shot_duration_sec for s in beat.shots)
+            if shot_total > 0 and abs(shot_total - dur) > 0.5:
+                scale = dur / shot_total
+                for s in beat.shots:
+                    s.shot_duration_sec = round(s.shot_duration_sec * scale, 2)
         t += dur
     screenplay.duration_sec = int(round(t))
-    if over_cap:
-        print(f"[align] scenes over 15s cap: {over_cap} — total reel {t:.1f}s")
-    if t > 130:
-        print(f"[align] ⚠ reel total {t:.1f}s exceeds 130s — may be too long for Shorts/Reels")
 
-    # Continuity check: scenes should be sequential in source audio.
-    for i in range(1, len(screenplay.scenes)):
-        prev = screenplay.scenes[i - 1]
-        curr = screenplay.scenes[i]
+    # Continuity check.
+    for i in range(1, len(screenplay.beats)):
+        prev = screenplay.beats[i - 1]
+        curr = screenplay.beats[i]
         if prev.source_end is not None and curr.source_start is not None:
             gap = abs(float(curr.source_start) - float(prev.source_end))
             if gap > 1.0:
-                print(
-                    f"[align] ⚠ gap {gap:.1f}s between scene {i} and {i+1} "
-                    f"(source {prev.source_end:.1f} → {curr.source_start:.1f})"
-                )
+                print(f"[align] ⚠ gap {gap:.1f}s between beat {i} and {i+1}")
     return screenplay
 
 
@@ -858,7 +849,7 @@ def _run_script_task(
             "script.visual_director", _with_visual_director, screenplay,
             model="haiku-4.5", estimated_cost=0.005, estimated_tokens=5000,
         )
-        screenplay = _align_scene_timelines(screenplay)
+        screenplay = _align_beat_timelines(screenplay)
         script_dict = screenplay.model_dump()
         scene_audio = ctx.call(
             "script.audio_slice", slice_scenes,

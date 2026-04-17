@@ -29,6 +29,9 @@ exports.handler = async (event) => {
     sceneBroll: event.scene_broll || [],
     assetsBucket: ASSETS_BUCKET,
     projectId: `${episode_id}/idea-${idea_rank}`,
+    // Multi-shot broll (new) + legacy compat
+    shotBroll: event.shot_broll || event.scene_broll || [],
+    sceneBroll: event.scene_broll || event.shot_broll || [],
   };
 
   // 1. Kick off render — SDK handles all version/payload wiring.

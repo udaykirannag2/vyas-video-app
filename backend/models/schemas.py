@@ -18,15 +18,12 @@ class Idea(BaseModel):
     target_length_sec: int = 30
     why_it_works: str
     rank: int
-    # One CONTINUOUS window of the podcast this reel will use.
     window_start: float = 0.0
     window_end: float = 0.0
     window_text: str = ""
-    # Narrative arc annotations — help the screenwriter assign beat types.
-    hook_line: str = ""     # most attention-grabbing line in the window
-    twist_line: str = ""    # key insight / reframe moment
-    payoff_line: str = ""   # conclusion / takeaway
-    # Deprecated
+    hook_line: str = ""
+    twist_line: str = ""
+    payoff_line: str = ""
     quotes: List[Quote] = Field(default_factory=list)
 
 
@@ -34,28 +31,53 @@ class IdeasResponse(BaseModel):
     ideas: List[Idea]
 
 
-class Scene(BaseModel):
-    start: float
-    end: float
-    voiceover: str
-    on_screen_text: str
-    visual: str
-    # Narrative beat — drives visual register and Nova Reel prompt style.
-    # One of: hook | setup | build | twist | payoff
-    beat_type: str = "build"
+# ---- Multi-shot beat structure ----
+
+class Shot(BaseModel):
+    """One visual clip within a beat. A beat typically has 2-4 shots."""
+    shot_number: int
+    shot_duration_sec: float  # how long this shot holds on screen
+    # Role in the visual storytelling:
+    #   hook / establish / detail / contrast / payoff / reflection
+    shot_role: str = "establish"
+    # Visual abstraction level:
+    #   literal (concrete, recognizable) / hybrid / metaphorical (abstract, symbolic)
+    visual_mode: str = "metaphorical"
+    visual: str  # cinematic scene description for Nova Reel
+    framing: str = ""  # close-up / medium / wide / extreme-close-up / aerial
+    camera_movement: str = ""  # slow zoom / static / tracking / pull back / dolly
+    transition_hint: str = ""  # cut / dissolve / match-cut / fade
     broll_queries: List[str] = Field(default_factory=list)
     broll_query: str = ""
+
+
+class Beat(BaseModel):
+    """One spoken segment of the reel. Contains the audio voiceover and
+    2-4 visual shots that play during that voiceover."""
+    # Reel timeline (set by _align_beat_timelines, not the agent).
+    start: float = 0.0
+    end: float = 0.0
+    # Source podcast audio span.
     source_start: float | None = None
     source_end: float | None = None
+    voiceover: str
+    on_screen_text: str
+    # Narrative purpose: hook | setup | build | twist | payoff
+    purpose: str = "build"
+    # 2-4 visual shots that tile across this beat's duration.
+    shots: List[Shot] = Field(default_factory=list)
 
 
 class Screenplay(BaseModel):
     title: str
     duration_sec: int
     aspect: str = "9:16"
-    scenes: List[Scene]
+    beats: List[Beat]
     caption: str
     hashtags: List[str]
+    # Deprecated: old single-shot scenes. Kept so GET /script doesn't crash
+    # on data written before the multi-shot migration.
+    scenes: List[dict] = Field(default_factory=list)
 
 
 class ReviseRequest(BaseModel):

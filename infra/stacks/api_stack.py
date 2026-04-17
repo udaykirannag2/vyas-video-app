@@ -58,7 +58,7 @@ class ApiStack(Stack):
             architecture=_lambda.Architecture.ARM_64,
             handler="api.handler",
             code=backend_code(),
-            timeout=Duration.minutes(3),
+            timeout=Duration.minutes(5),  # multi-shot: screenwriter ~130s + director ~70s + slice ~15s
             memory_size=2048,  # FFmpeg slicing + Bedrock streaming runs inline here now
             environment=env,
             layers=[ffmpeg_layer],

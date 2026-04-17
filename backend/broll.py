@@ -125,8 +125,43 @@ def _download_pexels(vf_link: str, broll_key: str) -> bool:
         return False
 
 
+def _flatten_shots(script: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten beats→shots into a flat list with global IDs for Nova/Pexels.
+    Each entry has: global_id, beat_idx, shot_idx, shot dict, beat purpose."""
+    flat: list[dict[str, Any]] = []
+    beats = script.get("beats") or []
+    # Fallback: legacy scenes[] treated as single-shot beats.
+    if not beats:
+        for i, scene in enumerate(script.get("scenes") or []):
+            flat.append({
+                "global_id": f"b{i}_s0",
+                "beat_idx": i,
+                "shot_idx": 0,
+                "visual": scene.get("visual", ""),
+                "beat_purpose": scene.get("beat_type") or scene.get("purpose", "build"),
+                "broll_queries": scene.get("broll_queries", []),
+                "broll_query": scene.get("broll_query", ""),
+                "shot_duration_sec": float(scene.get("end", 0)) - float(scene.get("start", 0)),
+            })
+        return flat
+    for bi, beat in enumerate(beats):
+        for si, shot in enumerate(beat.get("shots") or []):
+            flat.append({
+                "global_id": f"b{bi}_s{si}",
+                "beat_idx": bi,
+                "shot_idx": si,
+                "visual": shot.get("visual", ""),
+                "beat_purpose": beat.get("purpose", "build"),
+                "shot_role": shot.get("shot_role", "establish"),
+                "broll_queries": shot.get("broll_queries", []),
+                "broll_query": shot.get("broll_query", ""),
+                "shot_duration_sec": float(shot.get("shot_duration_sec", 3)),
+            })
+    return flat
+
+
 def handler(event: dict[str, Any], _ctx) -> dict[str, Any]:
-    ctx = RunContext()  # per-invocation run context for Nova calls
+    ctx = RunContext()
     episode_id = event["episode_id"]
     idea_rank = event.get("idea_rank")
     project_id = event.get("project_id", f"{episode_id}/idea-{idea_rank}")
@@ -134,99 +169,77 @@ def handler(event: dict[str, Any], _ctx) -> dict[str, Any]:
 
     key = _pexels_key()
     headers = {"Authorization": key}
-    scene_broll: list[dict[str, Any]] = [None] * len(script["scenes"])  # type: ignore
-    pexels_fallbacks: list[tuple[int, dict[str, Any]]] = []
 
-    # Pass 1: Nova Reel (PRIMARY) for every scene — generates video from the
-    # scene's `visual` direction text. Higher cost but visuals match the
-    # spiritual/metaphorical content far better than stock footage.
-    nova_scenes: list[tuple[int, dict[str, Any]]] = [
-        (i, scene) for i, scene in enumerate(script["scenes"])
-    ]
+    # Flatten beats→shots into a global shot list.
+    shots = _flatten_shots(script)
+    shot_broll: dict[str, dict[str, Any]] = {}
+    pexels_fallbacks: list[dict[str, Any]] = []
 
-    if nova_scenes:
-        print(f"[broll] firing {len(nova_scenes)} Nova Reel job(s) (primary, staggered)")
-        pending: dict[int, tuple[str, str]] = {}
-        import time as _time
-        for j, (i, scene) in enumerate(nova_scenes):
-            if j > 0:
-                _time.sleep(3)  # stagger to avoid concurrency throttle
-            # Nova Reel gets the cinematic `visual` description (polished by the
-            # visual director), not the Pexels search keywords.
-            prompt_text = scene.get("visual") or (scene.get("voiceover") or "")[:200]
-            beat = scene.get("beat_type", "build")
-            nova_prefix = f"tmp/nova/{project_id}/scene_{i:02d}"
-            try:
-                ctx._check_budgets(f"nova.scene_{i}", estimated_cost=0.48)
-                arn = nova_reel.start(prompt_text, BUCKET, nova_prefix, beat_type=beat)
-                ctx.estimated_cost += 0.48
-                ctx.llm_calls += 1
-                pending[i] = (arn, nova_prefix)
-                glog(f"[broll] nova start scene {i}: {arn}", cost=f"${ctx.estimated_cost:.2f}")
-            except Exception as e:
-                glog(f"[broll] nova start failed scene {i}: {e!r}")
-                scene_broll[i] = {
-                    "index": i, "broll_key": None, "broll_url": None,
-                    "source": "none", "matched_query": None,
-                }
+    # Pass 1: Nova Reel (PRIMARY) for every shot.
+    glog(f"[broll] {len(shots)} shot(s) across {len(script.get('beats', script.get('scenes', [])))} beats")
+    pending: dict[str, tuple[str, str]] = {}
+    import time as _time
+    for j, shot in enumerate(shots):
+        if j > 0:
+            _time.sleep(3)
+        gid = shot["global_id"]
+        prompt_text = shot["visual"] or "A cinematic spiritual contemplative clip"
+        beat_purpose = shot.get("beat_purpose", "build")
+        nova_prefix = f"tmp/nova/{project_id}/{gid}"
+        try:
+            ctx._check_budgets(f"nova.{gid}", estimated_cost=0.48)
+            arn = nova_reel.start(prompt_text, BUCKET, nova_prefix, beat_type=beat_purpose)
+            ctx.estimated_cost += 0.48
+            ctx.llm_calls += 1
+            pending[gid] = (arn, nova_prefix)
+            glog(f"[broll] nova start {gid}", cost=f"${ctx.estimated_cost:.2f}")
+        except Exception as e:
+            glog(f"[broll] nova start failed {gid}: {e!r}")
+            shot_broll[gid] = {"global_id": gid, "broll_key": None, "broll_url": None, "source": "none"}
+            pexels_fallbacks.append(shot)
 
-        # Poll all Nova jobs concurrently.
-        def _wait_and_copy(scene_index: int) -> dict[str, Any]:
-            arn, _ = pending[scene_index]
-            try:
-                resp = nova_reel.wait(arn, timeout_sec=540)
-                nova_key = nova_reel.output_key(resp)
-                # Copy into the canonical broll path so render + frontend code
-                # doesn't need to know about Nova's layout.
-                broll_key = f"projects/{project_id}/broll/scene_{scene_index:02d}.mp4"
-                _s3.copy_object(
-                    Bucket=BUCKET,
-                    Key=broll_key,
-                    CopySource={"Bucket": BUCKET, "Key": nova_key},
-                )
-                return {
-                    "index": scene_index,
-                    "broll_key": broll_key,
-                    "broll_url": _presign(broll_key),
-                    "source": "nova-reel",
-                    "matched_query": None,
-                    "nova_invocation_arn": arn,
-                }
-            except Exception as e:
-                print(f"[broll] nova wait/copy failed scene {scene_index}: {e!r}")
-                return {
-                    "index": scene_index, "broll_key": None, "broll_url": None,
-                    "source": "nova-failed", "matched_query": None,
-                }
+    # Poll all Nova jobs concurrently.
+    def _wait_and_copy(gid: str) -> dict[str, Any]:
+        arn, _ = pending[gid]
+        try:
+            resp = nova_reel.wait(arn, timeout_sec=540)
+            nova_key = nova_reel.output_key(resp)
+            broll_key = f"projects/{project_id}/broll/{gid}.mp4"
+            _s3.copy_object(Bucket=BUCKET, Key=broll_key, CopySource={"Bucket": BUCKET, "Key": nova_key})
+            return {"global_id": gid, "broll_key": broll_key, "broll_url": _presign(broll_key), "source": "nova-reel"}
+        except Exception as e:
+            glog(f"[broll] nova wait/copy failed {gid}: {e!r}")
+            return {"global_id": gid, "broll_key": None, "broll_url": None, "source": "nova-failed"}
 
-        with ThreadPoolExecutor(max_workers=len(pending) or 1) as pool:
-            futures = {pool.submit(_wait_and_copy, idx): idx for idx in pending}
+    if pending:
+        with ThreadPoolExecutor(max_workers=min(len(pending), 6)) as pool:
+            futures = {pool.submit(_wait_and_copy, gid): gid for gid in pending}
             for fut in as_completed(futures):
                 result = fut.result()
-                scene_broll[result["index"]] = result
-                if result.get("source") in ("nova-failed", None) and not result.get("broll_key"):
-                    idx = result["index"]
-                    pexels_fallbacks.append((idx, script["scenes"][idx]))
+                shot_broll[result["global_id"]] = result
+                if not result.get("broll_key"):
+                    matching = [s for s in shots if s["global_id"] == result["global_id"]]
+                    if matching:
+                        pexels_fallbacks.append(matching[0])
 
-    # Pass 2: Pexels (SECONDARY) for any scenes where Nova failed.
+    # Pass 2: Pexels (SECONDARY) for any Nova misses.
     if pexels_fallbacks:
-        print(f"[broll] {len(pexels_fallbacks)} Nova miss(es) — trying Pexels fallback")
-        for i, scene in pexels_fallbacks:
-            queries: list[str] = scene.get("broll_queries") or []
-            if not queries and scene.get("broll_query"):
-                queries = [scene["broll_query"]]
-            scene_duration = max(1.0, float(scene.get("end", 0)) - float(scene.get("start", 0)))
-            video, vf, matched = _pick_best(queries, headers, scene_duration)
+        glog(f"[broll] {len(pexels_fallbacks)} Nova miss(es) — trying Pexels")
+        for shot in pexels_fallbacks:
+            gid = shot["global_id"]
+            queries = shot.get("broll_queries") or []
+            if not queries and shot.get("broll_query"):
+                queries = [shot["broll_query"]]
+            dur = max(1.0, shot.get("shot_duration_sec", 3))
+            video, vf, matched = _pick_best(queries, headers, dur)
             if video and vf:
-                broll_key = f"projects/{project_id}/broll/scene_{i:02d}.mp4"
+                broll_key = f"projects/{project_id}/broll/{gid}.mp4"
                 if _download_pexels(vf["link"], broll_key):
-                    scene_broll[i] = {
-                        "index": i,
-                        "broll_key": broll_key,
-                        "broll_url": _presign(broll_key),
-                        "source": "pexels-fallback",
-                        "matched_query": matched,
-                        "pexels_id": video.get("id"),
+                    shot_broll[gid] = {
+                        "global_id": gid, "broll_key": broll_key,
+                        "broll_url": _presign(broll_key), "source": "pexels-fallback",
                     }
 
-    return {**event, "scene_broll": scene_broll}
+    # Return as flat list (Remotion reads it) + the old scene_broll key for compat.
+    broll_list = [shot_broll.get(s["global_id"], {"global_id": s["global_id"], "source": "none"}) for s in shots]
+    return {**event, "shot_broll": broll_list, "scene_broll": broll_list}

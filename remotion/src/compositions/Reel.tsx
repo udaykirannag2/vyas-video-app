@@ -3,47 +3,66 @@ import {
   AbsoluteFill,
   Sequence,
   Audio,
-  Video,
   useVideoConfig,
 } from "remotion";
 import { TextOverlay } from "../components/TextOverlay";
 import { BRollClip } from "../components/BRollClip";
 
-export interface Scene {
-  start: number;
-  end: number;
-  voiceover: string;
-  on_screen_text: string;
+// ---- Types ----
+
+export interface Shot {
+  shot_number: number;
+  shot_duration_sec: number;
+  shot_role: string;
+  visual_mode: string;
   visual: string;
+  framing: string;
+  camera_movement: string;
+  transition_hint: string;
+  broll_queries: string[];
   broll_query: string;
 }
 
-export interface Script {
-  title: string;
-  duration_sec: number;
-  aspect: string;
-  scenes: Scene[];
-  caption: string;
-  hashtags: string[];
+export interface Beat {
+  start: number;
+  end: number;
+  source_start: number | null;
+  source_end: number | null;
+  voiceover: string;
+  on_screen_text: string;
+  purpose: string;
+  shots: Shot[];
 }
 
 export interface SceneAudio {
   index: number;
   audio_key: string;
-  audio_url?: string; // presigned URL preferred; audio_key kept for debugging
+  audio_url?: string;
   marks_key: string | null;
 }
 
-export interface SceneBroll {
-  index: number;
+export interface ShotBroll {
+  global_id: string;
   broll_key: string | null;
   broll_url?: string | null;
+  source?: string;
 }
 
 export interface ReelProps {
-  script: Script;
+  script: {
+    title: string;
+    duration_sec: number;
+    aspect: string;
+    beats: Beat[];
+    // Legacy compat
+    scenes?: any[];
+    caption: string;
+    hashtags: string[];
+  };
   sceneAudio: SceneAudio[];
-  sceneBroll: SceneBroll[];
+  shotBroll: ShotBroll[];
+  // Legacy compat
+  sceneBroll?: ShotBroll[];
   assetsBucket: string;
   projectId: string;
 }
@@ -54,45 +73,110 @@ const s3Url = (bucket: string, key: string) =>
 export const Reel: React.FC<ReelProps> = ({
   script,
   sceneAudio,
+  shotBroll,
   sceneBroll,
   assetsBucket,
 }) => {
   const { fps } = useVideoConfig();
+  const beats = script.beats?.length ? script.beats : [];
+  const allBroll = shotBroll?.length ? shotBroll : sceneBroll || [];
+
+  // Build a flat shot index matching the global_id pattern "b{beatIdx}_s{shotIdx}"
+  let globalShotIdx = 0;
 
   return (
     <AbsoluteFill style={{ backgroundColor: "black" }}>
-      {script.scenes.map((scene, i) => {
-        const startFrame = Math.round(scene.start * fps);
-        const durationFrames = Math.max(1, Math.round((scene.end - scene.start) * fps));
-        const audio = sceneAudio.find((a) => a.index === i);
-        const broll = sceneBroll.find((b) => b.index === i);
-
-        const brollSrc =
-          broll?.broll_url ||
-          (broll?.broll_key ? s3Url(assetsBucket, broll.broll_key) : null);
+      {beats.map((beat, bi) => {
+        const beatStartFrame = Math.round(beat.start * fps);
+        const beatDurationFrames = Math.max(
+          1,
+          Math.round((beat.end - beat.start) * fps)
+        );
+        const audio = sceneAudio.find((a) => a.index === bi);
         const audioSrc =
           audio?.audio_url ||
           (audio?.audio_key ? s3Url(assetsBucket, audio.audio_key) : null);
 
+        // Render shots within the beat as sub-sequences.
+        let shotOffset = 0;
+        const shotElements = (beat.shots || []).map((shot, si) => {
+          const shotFrames = Math.max(
+            1,
+            Math.round(shot.shot_duration_sec * fps)
+          );
+          const brollEntry = allBroll[globalShotIdx] || null;
+          globalShotIdx++;
+          const brollSrc =
+            (brollEntry as any)?.broll_url ||
+            ((brollEntry as any)?.broll_key
+              ? s3Url(assetsBucket, (brollEntry as any).broll_key)
+              : null);
+
+          const el = (
+            <Sequence
+              key={`b${bi}_s${si}`}
+              from={shotOffset}
+              durationInFrames={shotFrames}
+              name={`beat-${bi}-shot-${si}`}
+            >
+              {brollSrc ? (
+                <BRollClip src={brollSrc} />
+              ) : (
+                <AbsoluteFill
+                  style={{
+                    background: "linear-gradient(135deg,#1a1a2e,#16213e)",
+                  }}
+                />
+              )}
+            </Sequence>
+          );
+          shotOffset += shotFrames;
+          return el;
+        });
+
+        // If no shots, show a gradient for the whole beat.
+        if (shotElements.length === 0) {
+          const brollEntry = allBroll[globalShotIdx] || null;
+          globalShotIdx++;
+          const brollSrc =
+            (brollEntry as any)?.broll_url ||
+            ((brollEntry as any)?.broll_key
+              ? s3Url(assetsBucket, (brollEntry as any).broll_key)
+              : null);
+          shotElements.push(
+            <Sequence
+              key={`b${bi}_fallback`}
+              from={0}
+              durationInFrames={beatDurationFrames}
+              name={`beat-${bi}-fallback`}
+            >
+              {brollSrc ? (
+                <BRollClip src={brollSrc} />
+              ) : (
+                <AbsoluteFill
+                  style={{
+                    background: "linear-gradient(135deg,#1a1a2e,#16213e)",
+                  }}
+                />
+              )}
+            </Sequence>
+          );
+        }
+
         return (
           <Sequence
-            key={i}
-            from={startFrame}
-            durationInFrames={durationFrames}
-            name={`scene-${i}`}
+            key={`beat-${bi}`}
+            from={beatStartFrame}
+            durationInFrames={beatDurationFrames}
+            name={`beat-${bi}`}
           >
-            {brollSrc ? (
-              <BRollClip src={brollSrc} />
-            ) : (
-              <AbsoluteFill
-                style={{
-                  background: "linear-gradient(135deg,#1a1a2e,#16213e)",
-                }}
-              />
-            )}
+            {/* Visual shots */}
+            {shotElements}
 
-            <TextOverlay text={scene.on_screen_text} />
+            {/* Text overlay spans the whole beat */}
+            <TextOverlay text={beat.on_screen_text} />
 
+            {/* Audio spans the whole beat */}
             {audioSrc && <Audio src={audioSrc} />}
           </Sequence>
         );
@@ -106,29 +190,48 @@ export const defaultReelProps: ReelProps = {
     title: "Sample Reel",
     duration_sec: 6,
     aspect: "9:16",
-    scenes: [
+    beats: [
       {
         start: 0,
-        end: 3,
+        end: 6,
+        source_start: 0,
+        source_end: 6,
         voiceover: "What if losing meant winning?",
         on_screen_text: "WHAT IF?",
-        visual: "still lake at dawn",
-        broll_query: "calm lake dawn",
-      },
-      {
-        start: 3,
-        end: 6,
-        voiceover: "Detach from the outcome. Focus on the act.",
-        on_screen_text: "ACT WITHOUT ATTACHMENT",
-        visual: "runner mid-stride",
-        broll_query: "runner slow motion",
+        purpose: "hook",
+        shots: [
+          {
+            shot_number: 1,
+            shot_duration_sec: 3,
+            shot_role: "hook",
+            visual_mode: "metaphorical",
+            visual: "Eye opening in darkness",
+            framing: "extreme-close-up",
+            camera_movement: "slow zoom",
+            transition_hint: "cut",
+            broll_queries: ["eye opening darkness"],
+            broll_query: "eye opening darkness",
+          },
+          {
+            shot_number: 2,
+            shot_duration_sec: 3,
+            shot_role: "establish",
+            visual_mode: "metaphorical",
+            visual: "Sunrise over calm lake",
+            framing: "wide",
+            camera_movement: "pull back",
+            transition_hint: "dissolve",
+            broll_queries: ["sunrise lake calm"],
+            broll_query: "sunrise lake calm",
+          },
+        ],
       },
     ],
-    caption: "A 15-second reframe from BG 2.47.",
-    hashtags: ["#BhagavadGita", "#Wisdom", "#SelfGrowth"],
+    caption: "A reframe from the Gita.",
+    hashtags: ["#BhagavadGita"],
   },
   sceneAudio: [],
-  sceneBroll: [],
-  assetsBucket: "vyas-video-assets-local",
+  shotBroll: [],
+  assetsBucket: "local",
   projectId: "sample",
 };

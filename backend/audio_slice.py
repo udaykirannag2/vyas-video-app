@@ -80,7 +80,9 @@ def slice_scenes(
         _s3.download_file(BUCKET, source_audio_key, source_local)
 
         scene_audio: list[dict[str, Any]] = []
-        for i, scene in enumerate(script["scenes"]):
+        # Support new beats[] and legacy scenes[] layout.
+        segments = script.get("beats") or script.get("scenes") or []
+        for i, scene in enumerate(segments):
             out_key = (
                 f"episodes/{episode_id}/idea-{idea_rank}/scripts/{version}/tts/scene_{i:02d}.mp3"
             )
