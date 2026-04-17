@@ -26,8 +26,31 @@ export interface Idea {
 export interface EpisodeIdea extends Idea {
   has_script: boolean;
   script_version: string | null;
+  script_status: string | null;
   render_status: string | null;
   render_mp4_key: string | null;
+}
+
+export interface ShotData {
+  shot_number: number;
+  shot_duration_sec: number;
+  shot_role: string;
+  visual_mode: string;
+  visual: string;
+  framing: string;
+  camera_movement: string;
+  transition_hint: string;
+}
+
+export interface BeatData {
+  start: number;
+  end: number;
+  source_start?: number | null;
+  source_end?: number | null;
+  voiceover: string;
+  on_screen_text: string;
+  purpose: string;
+  shots: ShotData[];
 }
 
 export interface SceneAudio {
@@ -38,7 +61,9 @@ export interface SceneAudio {
 }
 
 export interface ScriptResponse extends Screenplay {
+  beats: BeatData[];
   scene_audio: SceneAudio[];
+  status?: string;
 }
 
 export interface Scene {

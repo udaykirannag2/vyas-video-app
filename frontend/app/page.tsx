@@ -7,6 +7,7 @@ import {
   EpisodeIdea,
   SceneAudio,
   ScriptResponse,
+  BeatData,
   Quote,
 } from "../lib/api";
 
@@ -559,30 +560,43 @@ function IdeaView({
   const [renderStatus, setRenderStatus] = useState<string | null>(null);
   const [mp4Url, setMp4Url] = useState<string | null>(null);
 
-  // Load existing script (if any) on mount
+  // Load existing script on mount. If a script is GENERATING (e.g. user
+  // navigated away and came back), resume polling automatically.
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       const ep = await run(() => api.getEpisode(episodeId));
-      if (!ep) return;
+      if (!ep || cancelled) return;
       const idea = ep.ideas.find((i) => i.rank === rank);
       if (!idea) return;
       setRenderStatus(idea.render_status);
       setScriptVersion(idea.script_version);
-      if (idea.has_script) {
+
+      // Check script state: READY, GENERATING, or NONE.
+      const scriptStat = idea.script_status;
+      if (scriptStat === "GENERATING") {
+        // Resume polling — script is being generated in the background.
+        await run(async () => {
+          await pollScriptUntilReady();
+          return true;
+        });
+      } else if (idea.has_script) {
         const s = await run(() => api.getScript(episodeId, rank));
-        if (s && (s as ScriptResponse).scenes) setScript(s as ScriptResponse);
+        if (s && !cancelled && isReadyScript(s)) setScript(s);
       }
+
       if (idea.render_status === "READY" && idea.render_mp4_key) {
         const u = await run(() => api.assetUrl(idea.render_mp4_key!));
-        if (u) setMp4Url(u.url);
+        if (u && !cancelled) setMp4Url(u.url);
       } else if (idea.render_status === "RENDERING") {
         pollRender();
       }
     })();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [episodeId, rank]);
 
-  const audioForScene = (i: number): SceneAudio | undefined =>
+  const audioForBeat = (i: number): SceneAudio | undefined =>
     script?.scene_audio?.find((a) => a.index === i);
 
   const pollRender = async () => {
@@ -600,6 +614,9 @@ function IdeaView({
     tick();
   };
 
+  const isReadyScript = (d: any): d is ScriptResponse =>
+    d && (Array.isArray(d.beats) && d.beats.length > 0);
+
   const pollScriptUntilReady = async () => {
     while (true) {
       const s = await api.scriptStatus(episodeId, rank);
@@ -607,11 +624,11 @@ function IdeaView({
       if (s.status === "SCRIPT_FAILED") {
         throw new Error("Script generation failed: " + (s.failure_reason ?? "unknown"));
       }
-      await new Promise((r) => setTimeout(r, 5000));
+      await new Promise((r) => setTimeout(r, 6000));
     }
     const fresh = await api.getScript(episodeId, rank);
-    if ((fresh as ScriptResponse).scenes) {
-      setScript(fresh as ScriptResponse);
+    if (isReadyScript(fresh)) {
+      setScript(fresh);
     }
   };
 
@@ -667,52 +684,54 @@ function IdeaView({
             {script.duration_sec}s · {script.aspect}
             {scriptVersion && ` · v${scriptVersion}`}
           </p>
-          <div style={{ display: "grid", gap: 10 }}>
-            {script.scenes.map((s, idx) => {
-              const aud = audioForScene(idx);
-              const isBug = aud?.source === "polly-bug";
+          <div style={{ display: "grid", gap: 12 }}>
+            {(script.beats || []).map((beat, bi) => {
+              const aud = audioForBeat(bi);
               return (
                 <div
-                  key={idx}
+                  key={bi}
                   style={{
                     border: "1px solid var(--border)",
-                    borderRadius: 6,
-                    padding: 10,
+                    borderRadius: 8,
+                    padding: 12,
                     background: "#0e1118",
                   }}
                 >
-                  <div
-                    style={{
-                      color: "var(--muted)",
-                      fontSize: 12,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                    }}
-                  >
-                    <span>scene {idx + 1} · {s.start}–{s.end}s</span>
-                    {typeof s.source_start === "number" && typeof s.source_end === "number" && (
+                  <div style={{ color: "var(--muted)", fontSize: 12, display: "flex", gap: 8, marginBottom: 6 }}>
+                    <span style={{
+                      background: beat.purpose === "hook" ? "#7a2d2d" : beat.purpose === "twist" ? "#2d5a7a" : beat.purpose === "payoff" ? "#2d7a2d" : "#444",
+                      color: "white", fontSize: 10, padding: "2px 6px", borderRadius: 999, fontWeight: 700, textTransform: "uppercase",
+                    }}>{beat.purpose}</span>
+                    <span>beat {bi + 1} · {beat.start.toFixed(0)}–{beat.end.toFixed(0)}s</span>
+                    {typeof beat.source_start === "number" && typeof beat.source_end === "number" && (
                       <span style={{ color: "var(--accent)" }}>
-                        source {s.source_start.toFixed(1)}–{s.source_end.toFixed(1)}s
+                        src {beat.source_start.toFixed(1)}–{beat.source_end.toFixed(1)}s
                       </span>
                     )}
-                    {isBug && (
-                      <span style={{ color: "#ff9999" }}>⚠ synthesized (no timestamps)</span>
-                    )}
                   </div>
-                  <div style={{ margin: "6px 0" }}>
-                    <b>VO:</b> {s.voiceover}
+                  <div style={{ margin: "4px 0" }}>
+                    <b>VO:</b> {beat.voiceover.length > 150 ? beat.voiceover.slice(0, 150) + "…" : beat.voiceover}
                   </div>
-                  <div style={{ color: "var(--muted)", marginBottom: 8 }}>
-                    <b>Text:</b> {s.on_screen_text} · <b>Visual:</b> {s.visual}
+                  <div style={{ color: "var(--muted)", marginBottom: 6 }}>
+                    <b>Text:</b> {beat.on_screen_text}
                   </div>
                   {aud?.audio_url && (
-                    <audio
-                      controls
-                      preload="none"
-                      src={aud.audio_url}
-                      style={{ width: "100%", height: 32 }}
-                    />
+                    <audio controls preload="none" src={aud.audio_url} style={{ width: "100%", height: 32, marginBottom: 8 }} />
+                  )}
+                  {beat.shots?.length > 0 && (
+                    <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
+                      <div style={{ color: "var(--muted)", fontSize: 11 }}>{beat.shots.length} shot(s):</div>
+                      {beat.shots.map((shot, si) => (
+                        <div key={si} style={{ borderLeft: "2px solid var(--border)", paddingLeft: 10, fontSize: 13 }}>
+                          <span style={{ color: "var(--accent)", fontSize: 11 }}>
+                            #{shot.shot_number} · {shot.shot_duration_sec}s · {shot.framing} · {shot.visual_mode}
+                          </span>
+                          <div style={{ color: "var(--text)", marginTop: 2 }}>
+                            {shot.visual.length > 120 ? shot.visual.slice(0, 120) + "…" : shot.visual}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
               );
