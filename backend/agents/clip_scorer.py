@@ -24,16 +24,46 @@ INPUT: A list of candidate clips extracted from a podcast episode. Each clip
 has an ID, topic summary, and the full verbatim text.
 
 YOUR JOB:
-1. SCORE each clip for reel-worthiness (1-10). Consider:
-   - Hook strength: does it open with something that stops a scroll?
-   - Insight density: is there a clear reframe / aha moment?
-   - Payoff clarity: does it end with a takeaway someone can use TODAY?
-   - Emotional resonance: does it hit anxiety, procrastination, comparison,
-     relationships, burnout, or decision paralysis?
-   - Self-containment: does a first-time listener understand the point?
+1. SCORE each clip for reel-worthiness (1-10). Use these weighted criteria:
+
+   Emotional resonance (30%):
+     Does it hit anxiety, comparison, imposter syndrome, procrastination,
+     burnout, relationships, or decision paralysis? Would a 25-year-old
+     screenshot this and send to a friend?
+
+   Hook strength (25%):
+     Does it open with something that stops a scroll? A bold claim, a
+     provocative question, a counterintuitive statement?
+
+   Insight / reframe (25%):
+     Is there an "I never thought of it that way" moment? A clear pivot
+     where the host flips the listener's assumption?
+
+   Payoff clarity (15%):
+     Does it end with a concrete takeaway — something the listener can
+     DO or THINK differently starting tonight?
+
+   Self-containment (5%):
+     Does the clip make sense without hearing the rest of the episode?
+     (Should always be true if the segment detector did its job.)
 
 2. For the TOP 2-3 clips (score ≥ 7), annotate:
-   - title: punchy reel title (max 60 chars, not clickbait but curiosity-driven)
+   - title: reel title, max 65 characters. Rules:
+     • Clear before clever — understandable on first read
+     • Use familiar spiritual nouns when present: Krishna, Gita, Namaste,
+       Pandavas, Mind, Intellect, Karma, Ego, Dharma
+     • Prefer a question, contrast, or "true meaning" framing
+     • Avoid overly poetic metaphor unless the metaphor IS the clip's subject
+     • If the clip explains a known concept, title the concept directly
+     • If the clip resolves confusion, use a question title
+     Style examples:
+       "The True Meaning of NAMASTE"
+       "Mind vs. Intellect — Who's Really in Control?"
+       "Why Are There Exactly 5 Pandavas?"
+       "Why Krishna Told Arjuna to Fight"
+       "What Karma Really Means"
+       "Ego vs. Self — What's the Difference?"
+       "Why the Gita Doesn't Teach Escape"
    - summary: 2-3 sentence description of the arc
    - why_it_works: 1-2 sentences on audience resonance
    - hook_line: the single most scroll-stopping line from the clip text.

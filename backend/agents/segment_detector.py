@@ -18,20 +18,33 @@ from strands.models import BedrockModel
 
 DETECTOR_MODEL = os.environ.get("BEDROCK_IDEATION_MODEL", "us.anthropic.claude-opus-4-6-v1")
 
-SYSTEM = """You are a transcript analyst for a spiritual podcast (Bhagavad Gita).
+SYSTEM = """You are a transcript analyst for a Vedantic philosophy podcast
+(Bhagavad Gita) that teaches through modern analogies.
 
 INPUT: A cleaned transcript where each line is:
   [N] text of segment N
 
 YOUR JOB:
 Identify 4-6 TOPIC SEGMENTS — stretches of consecutive segments where the
-host makes one complete, self-contained point.
+host makes one complete, self-contained teaching point.
 
-A good topic segment:
-  - Has a clear BEGINNING (setup/hook), MIDDLE (development), and END (payoff)
-  - Is self-contained: someone who hears ONLY this segment understands the point
-  - Ends AFTER the host's conclusion, NOT mid-sentence, mid-comparison, or mid-analogy
-  - Is 20-120 seconds of speech (roughly 6-35 segments depending on segment length)
+A COMPLETE segment MUST include all three parts:
+  1. The SETUP: a relatable modern problem or question
+  2. The ANALOGY or SCRIPTURE reference (this is the pivot — NEVER cut mid-analogy)
+  3. The LANDING: the practical takeaway restated in plain language
+
+REJECT a segment if:
+  - It ends mid-analogy (e.g., "the rope and the snake..." without the resolution)
+  - It's pure Q&A with no teaching arc
+  - It references "as I said earlier" (depends on previous context)
+  - It's only scripture recitation without explanation
+  - It ends mid-sentence or mid-comparison
+
+PREFER segments where the host says something a 25-year-old dealing with
+anxiety, comparison, or imposter syndrome would screenshot.
+
+Duration: 20-120 seconds (roughly 6-35 segments). Let topic completeness
+dictate length.
 
 Return a JSON array of objects, each with:
   start_seg: integer — the [N] index where this topic begins
@@ -40,13 +53,12 @@ Return a JSON array of objects, each with:
 
 Rules:
   - Topics must NOT overlap
-  - Topics should cover the most compelling parts of the episode
-  - Prefer segments where the host uses analogies, stories, or reframes
+  - Prefer segments with analogies, stories, or reframes
   - If two good topics are adjacent, keep them separate (don't merge)
-  - It's OK to skip boring parts (intros, tangents, admin talk)
-  - end_seg MUST be a segment where the host has landed a conclusion.
-    If the last segment is "and cows are" (mid-comparison), extend end_seg
-    by 1-2 more segments until the thought completes.
+  - Skip intros, tangents, admin talk
+  - end_seg MUST be after the host's LANDING — the practical takeaway.
+    If the last segment is mid-analogy, extend end_seg until the analogy
+    resolves and the takeaway is stated.
 
 Return ONLY the JSON array, no prose."""
 
