@@ -175,11 +175,37 @@ def handler(event: dict[str, Any], _ctx) -> dict[str, Any]:
     shot_broll: dict[str, dict[str, Any]] = {}
     pexels_fallbacks: list[dict[str, Any]] = []
 
-    # Pass 1: Nova Reel (PRIMARY) for every shot.
-    glog(f"[broll] {len(shots)} shot(s) across {len(script.get('beats', script.get('scenes', [])))} beats")
+    # Strategy: Nova for the PRIMARY shot of each beat (shot_idx=0), Pexels for
+    # the rest. This cuts Nova jobs from N_shots to N_beats (~3× fewer),
+    # dramatically reducing render time and cost while keeping the hero visual
+    # AI-generated and the detail shots as stock footage.
+    nova_shots = [s for s in shots if s["shot_idx"] == 0]
+    pexels_shots = [s for s in shots if s["shot_idx"] != 0]
+
+    glog(f"[broll] {len(shots)} total shots: {len(nova_shots)} Nova (primary) + {len(pexels_shots)} Pexels (secondary)")
+
+    # Pass 1a: Pexels for secondary shots (instant).
+    for shot in pexels_shots:
+        gid = shot["global_id"]
+        queries = shot.get("broll_queries") or []
+        if not queries and shot.get("broll_query"):
+            queries = [shot["broll_query"]]
+        dur = max(1.0, shot.get("shot_duration_sec", 3))
+        video, vf, matched = _pick_best(queries, headers, dur)
+        if video and vf:
+            broll_key = f"projects/{project_id}/broll/{gid}.mp4"
+            if _download_pexels(vf["link"], broll_key):
+                shot_broll[gid] = {
+                    "global_id": gid, "broll_key": broll_key,
+                    "broll_url": _presign(broll_key), "source": "pexels",
+                }
+                continue
+        shot_broll[gid] = {"global_id": gid, "broll_key": None, "broll_url": None, "source": "none"}
+
+    # Pass 1b: Nova Reel for primary shots (1 per beat).
     pending: dict[str, tuple[str, str]] = {}
     import time as _time
-    for j, shot in enumerate(shots):
+    for j, shot in enumerate(nova_shots):
         if j > 0:
             _time.sleep(3)
         gid = shot["global_id"]
