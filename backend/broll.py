@@ -19,6 +19,7 @@ import boto3
 import requests
 
 import nova_reel
+from guardrails import RunContext, log as glog
 
 _s3 = boto3.client("s3")
 _ssm = boto3.client("ssm")
@@ -125,6 +126,7 @@ def _download_pexels(vf_link: str, broll_key: str) -> bool:
 
 
 def handler(event: dict[str, Any], _ctx) -> dict[str, Any]:
+    ctx = RunContext()  # per-invocation run context for Nova calls
     episode_id = event["episode_id"]
     idea_rank = event.get("idea_rank")
     project_id = event.get("project_id", f"{episode_id}/idea-{idea_rank}")
@@ -155,11 +157,14 @@ def handler(event: dict[str, Any], _ctx) -> dict[str, Any]:
             beat = scene.get("beat_type", "build")
             nova_prefix = f"tmp/nova/{project_id}/scene_{i:02d}"
             try:
+                ctx._check_budgets(f"nova.scene_{i}", estimated_cost=0.48)
                 arn = nova_reel.start(prompt_text, BUCKET, nova_prefix, beat_type=beat)
+                ctx.estimated_cost += 0.48
+                ctx.llm_calls += 1
                 pending[i] = (arn, nova_prefix)
-                print(f"[broll] nova start scene {i}: {arn}")
+                glog(f"[broll] nova start scene {i}: {arn}", cost=f"${ctx.estimated_cost:.2f}")
             except Exception as e:
-                print(f"[broll] nova start failed scene {i}: {e!r}")
+                glog(f"[broll] nova start failed scene {i}: {e!r}")
                 scene_broll[i] = {
                     "index": i, "broll_key": None, "broll_url": None,
                     "source": "none", "matched_query": None,

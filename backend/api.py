@@ -42,6 +42,7 @@ from agents.screenwriter import write_script, revise_script
 from agents.visual_director import direct as direct_visuals
 from transcript_cleanup import cleanup as cleanup_transcript, segments_for_range
 from audio_slice import slice_scenes
+from guardrails import RunContext, GuardrailsConfig, GuardrailError, log as glog
 from models import Idea, Screenplay
 
 app = FastAPI(title="Vyas-Video API")
@@ -376,23 +377,27 @@ def _run_ideation(episode_id: int) -> None:
         meta = _get_meta(episode_id)
         if not meta.get("transcript_key"):
             raise RuntimeError("transcript missing")
-        # 3-step ideation pipeline:
-        #   Step 1: Transcript cleanup (code — remove filler, preserve timestamps)
-        #   Step 2: Semantic segment detection (LLM — find topic boundaries)
-        #   Step 3: Candidate clip scoring (LLM — rank + annotate arc)
+        # 3-step ideation pipeline with production guardrails.
+        ctx = RunContext()
 
         timed = _load_timed_transcript(episode_id)
         raw_segments = _parse_timed_segments(timed)
 
-        # Step 1: Clean transcript for LLM analysis. Preserves timestamp mapping.
-        clean_segs, clean_text, seg_idx = cleanup_transcript(raw_segments)
-        print(f"[ideation] step 1 cleanup: {len(raw_segments)} raw → {len(clean_segs)} clean segments")
+        # Step 1: Transcript cleanup (code, no LLM — no budget impact).
+        clean_segs, clean_text, seg_idx = ctx.call(
+            "ideation.cleanup", cleanup_transcript, raw_segments,
+            is_llm=False, estimated_cost=0,
+        )
+        glog(f"[ideation] step 1: {len(raw_segments)} raw → {len(clean_segs)} clean segments")
 
-        # Step 2: LLM detects semantic topic boundaries using segment indices.
-        topic_segments = detect_segments(clean_text)
-        print(f"[ideation] step 2 detect: {len(topic_segments)} topic candidates")
+        # Step 2: Semantic segment detection (Opus 4.6).
+        topic_segments = ctx.call(
+            "ideation.detect_segments", detect_segments, clean_text,
+            model="opus-4.6", estimated_cost=0.10, estimated_tokens=80000,
+        )
+        glog(f"[ideation] step 2: {len(topic_segments)} topic candidates")
 
-        # Build candidate list with full text + timestamps for scoring.
+        # Build candidate list with full text + timestamps.
         candidates = []
         for i, ts in enumerate(topic_segments):
             s_idx = int(ts["start_seg"])
@@ -409,9 +414,13 @@ def _run_ideation(episode_id: int) -> None:
                 "text": original_text,
             })
 
-        # Step 3: LLM scores and ranks candidates, annotates narrative arc.
-        scored = score_clips(candidates)
-        print(f"[ideation] step 3 score: {len(scored)} clips selected")
+        # Step 3: Clip scoring (Sonnet 4.6).
+        scored = ctx.call(
+            "ideation.score_clips", score_clips, candidates,
+            model="sonnet-4.6", estimated_cost=0.04, estimated_tokens=30000,
+        )
+        glog(f"[ideation] step 3: {len(scored)} clips selected")
+        glog(f"[ideation] run summary", **ctx.summary())
 
         # Build Idea objects from scored clips.
         from models import Idea as IdeaModel
@@ -821,6 +830,7 @@ def _run_script_task(
     Runs async (not inside an HTTP request) so it's not bound by the API
     Gateway HTTP 30-second integration timeout."""
     try:
+        ctx = RunContext()
         meta = _get_meta(episode_id)
         if not meta.get("audio_key"):
             raise RuntimeError("episode has no source audio")
@@ -828,27 +838,35 @@ def _run_script_task(
         if kind == "generate":
             idea = _load_idea(episode_id, rank)
             timed = _load_timed_transcript(episode_id)
-            # hook and summary are now clean (set by clip_scorer, not encoded).
-            screenplay = write_script(idea.model_dump(), timed)
+            screenplay = ctx.call(
+                "script.write", write_script, idea.model_dump(), timed,
+                model="sonnet-4.6", estimated_cost=0.04, estimated_tokens=20000,
+            )
         elif kind == "revise":
             current = _latest_ready_script(episode_id, rank)
             if not current:
                 raise RuntimeError("no ready script to revise from")
             base = Screenplay(**json.loads(current["screenplay"]))
-            screenplay = revise_script(base, instruction)
+            screenplay = ctx.call(
+                "script.revise", revise_script, base, instruction,
+                model="sonnet-4.6", estimated_cost=0.03, estimated_tokens=15000,
+            )
         else:
             raise RuntimeError(f"unknown script task kind: {kind!r}")
 
-        screenplay = _with_visual_director(screenplay)
+        screenplay = ctx.call(
+            "script.visual_director", _with_visual_director, screenplay,
+            model="haiku-4.5", estimated_cost=0.005, estimated_tokens=5000,
+        )
         screenplay = _align_scene_timelines(screenplay)
         script_dict = screenplay.model_dump()
-        scene_audio = slice_scenes(
-            episode_id=episode_id,
-            idea_rank=rank,
-            version=version,
-            script=script_dict,
-            source_audio_key=meta["audio_key"],
+        scene_audio = ctx.call(
+            "script.audio_slice", slice_scenes,
+            episode_id=episode_id, idea_rank=rank, version=version,
+            script=script_dict, source_audio_key=meta["audio_key"],
+            is_llm=False, estimated_cost=0,
         )
+        glog("[script] run summary", **ctx.summary())
 
         _ddb.update_item(
             Key={"pk": _ep_pk(episode_id), "sk": f"IDEA#{rank}#SCRIPT#{version}"},
