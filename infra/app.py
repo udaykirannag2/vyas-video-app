@@ -7,6 +7,7 @@ import aws_cdk as cdk
 from stacks.frontend_stack import FrontendStack
 from stacks.api_stack import ApiStack
 from stacks.render_stack import RenderStack
+from stacks.auth_stack import AuthStack
 
 APP_TAG = "vyas-video"
 
@@ -18,6 +19,7 @@ env = cdk.Environment(
 )
 
 render = RenderStack(app, "VyasVideoRender", env=env)
+auth = AuthStack(app, "VyasVideoAuth", env=env)
 api = ApiStack(
     app,
     "VyasVideoApi",
@@ -25,6 +27,8 @@ api = ApiStack(
     assets_bucket=render.assets_bucket,
     render_state_machine=render.state_machine,
     table=render.table,
+    user_pool=auth.user_pool,
+    user_pool_client=auth.web_client,
 )
 frontend = FrontendStack(app, "VyasVideoFrontend", env=env, api_url=api.api_url)
 

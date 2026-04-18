@@ -101,14 +101,19 @@ export interface EpisodeDetail {
   ideas: EpisodeIdea[];
 }
 
+import { getIdToken } from "./auth";
+
 async function req<T>(
   path: string,
   opts: RequestInit = {},
 ): Promise<T> {
-  const r = await fetch(`${API_URL}${path}`, {
-    headers: { "content-type": "application/json" },
-    ...opts,
-  });
+  const token = await getIdToken();
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    ...(opts.headers as Record<string, string> | undefined),
+  };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const r = await fetch(`${API_URL}${path}`, { ...opts, headers });
   if (!r.ok) throw new Error(`${path} ${r.status}: ${await r.text()}`);
   return r.json();
 }

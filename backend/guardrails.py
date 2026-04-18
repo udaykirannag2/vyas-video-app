@@ -54,7 +54,10 @@ class GuardrailsConfig:
     breaker_cooldown_sec: float = 60.0
 
     # -- Loop prevention --
-    max_identical_outputs: int = 2  # abort if same output hash appears N times
+    # Abort only if the SAME output appears 4+ times (was 2, too aggressive —
+    # transient-retry with deterministic low-temp prompts can legitimately
+    # produce the same output twice).
+    max_identical_outputs: int = 4
     max_schema_repair_attempts: int = 2  # structured_output retries
 
 

@@ -6,7 +6,9 @@ from aws_cdk import (
     CfnOutput,
     aws_lambda as _lambda,
     aws_apigatewayv2 as apigw,
+    aws_apigatewayv2_authorizers as apigw_auth,
     aws_apigatewayv2_integrations as integrations,
+    aws_cognito as cognito,
     aws_dynamodb as ddb,
     aws_iam as iam,
     aws_s3 as s3,
@@ -26,6 +28,8 @@ class ApiStack(Stack):
         assets_bucket: s3.IBucket,
         render_state_machine: sfn.IStateMachine,
         table: ddb.ITable,
+        user_pool: cognito.IUserPool,
+        user_pool_client: cognito.IUserPoolClient,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -112,13 +116,31 @@ class ApiStack(Stack):
             cors_preflight=apigw.CorsPreflightOptions(
                 allow_methods=[apigw.CorsHttpMethod.ANY],
                 allow_origins=["*"],
-                allow_headers=["*"],
+                allow_headers=["*", "Authorization"],
             ),
         )
+
+        # Cognito JWT authorizer — validates ID tokens issued by our pool.
+        jwt_authorizer = apigw_auth.HttpUserPoolAuthorizer(
+            "CognitoAuthorizer",
+            user_pool,
+            user_pool_clients=[user_pool_client],
+        )
+
+        lambda_int = integrations.HttpLambdaIntegration("ApiInt", api_fn)
+
+        # Public route: health check (no auth required).
+        http_api.add_routes(
+            path="/health",
+            methods=[apigw.HttpMethod.GET, apigw.HttpMethod.OPTIONS],
+            integration=lambda_int,
+        )
+        # Everything else requires a valid Cognito ID token.
         http_api.add_routes(
             path="/{proxy+}",
             methods=[apigw.HttpMethod.ANY],
-            integration=integrations.HttpLambdaIntegration("ApiInt", api_fn),
+            integration=lambda_int,
+            authorizer=jwt_authorizer,
         )
 
         self.api_url = http_api.api_endpoint

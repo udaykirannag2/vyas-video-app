@@ -10,6 +10,8 @@ import {
   BeatData,
   Quote,
 } from "../lib/api";
+import { AuthGate } from "./auth-gate";
+import { signOut } from "../lib/auth";
 
 type View =
   | { kind: "list" }
@@ -18,6 +20,15 @@ type View =
   | { kind: "idea"; episodeId: string; rank: number };
 
 export default function Home() {
+  const [user, setUser] = useState<string | null>(null);
+  return (
+    <AuthGate onUser={setUser}>
+      <App user={user} />
+    </AuthGate>
+  );
+}
+
+function App({ user }: { user: string | null }) {
   const [view, setView] = useState<View>({ kind: "list" });
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -104,7 +115,19 @@ export default function Home() {
           )}
         </nav>
         <div className="sidebar-footer">
-          Vyas-Video · Bhagavad Gita Reels
+          {user && (
+            <>
+              <div style={{ color: "var(--text)", fontWeight: 600, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis" }}>
+                {user}
+              </div>
+              <button
+                onClick={() => signOut().then(() => window.location.reload())}
+                style={{ background: "none", border: "none", color: "var(--muted)", padding: 0, fontSize: 11, cursor: "pointer" }}
+              >
+                Sign out
+              </button>
+            </>
+          )}
         </div>
       </aside>
 
