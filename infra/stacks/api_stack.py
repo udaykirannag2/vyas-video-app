@@ -132,13 +132,22 @@ class ApiStack(Stack):
         # Public route: health check (no auth required).
         http_api.add_routes(
             path="/health",
-            methods=[apigw.HttpMethod.GET, apigw.HttpMethod.OPTIONS],
+            methods=[apigw.HttpMethod.GET],
             integration=lambda_int,
         )
-        # Everything else requires a valid Cognito ID token.
+        # Protected routes — only non-OPTIONS methods pass through the JWT
+        # authorizer. OPTIONS (CORS preflight) is handled by API Gateway's
+        # corsPreflight config automatically and must NOT hit the authorizer
+        # (the browser doesn't send Authorization on preflight).
         http_api.add_routes(
             path="/{proxy+}",
-            methods=[apigw.HttpMethod.ANY],
+            methods=[
+                apigw.HttpMethod.GET,
+                apigw.HttpMethod.POST,
+                apigw.HttpMethod.PUT,
+                apigw.HttpMethod.DELETE,
+                apigw.HttpMethod.PATCH,
+            ],
             integration=lambda_int,
             authorizer=jwt_authorizer,
         )
