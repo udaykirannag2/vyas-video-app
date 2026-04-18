@@ -21,6 +21,8 @@ export default function Home() {
   const [view, setView] = useState<View>({ kind: "list" });
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [episodes, setEpisodes] = useState<EpisodeSummary[]>([]);
 
   const run = async <T,>(fn: () => Promise<T>): Promise<T | null> => {
     setBusy(true);
@@ -35,103 +37,160 @@ export default function Home() {
     }
   };
 
+  // Load episodes for sidebar on mount.
+  useEffect(() => {
+    api.listEpisodes().then((r) => setEpisodes(r.episodes)).catch(() => {});
+  }, []);
+
+  const refreshEpisodes = () => {
+    api.listEpisodes().then((r) => setEpisodes(r.episodes)).catch(() => {});
+  };
+
+  const breadcrumb = (() => {
+    if (view.kind === "new") return "New Episode";
+    if (view.kind === "episode") return `Episode ${view.episodeId}`;
+    if (view.kind === "idea") return `Episode ${view.episodeId} › Idea #${view.rank}`;
+    return "Episodes";
+  })();
+
   return (
-    <main style={{ maxWidth: 960, margin: "0 auto", padding: 32 }}>
-      <header style={{ marginBottom: 24, display: "flex", alignItems: "baseline", gap: 16 }}>
-        <h1
-          style={{ margin: 0, fontSize: 28, cursor: "pointer" }}
-          onClick={() => setView({ kind: "list" })}
-        >
-          Vyas-Video
-        </h1>
-        <span style={{ color: "var(--muted)" }}>
-          Bhagavad Gita podcast → reels for 15–35.
-        </span>
-      </header>
+    <div className="app-shell">
+      {/* Sidebar */}
+      <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
+        <div className="sidebar-header">
+          <div className="logo">V</div>
+          <h1>Vyas</h1>
+        </div>
+        <nav className="sidebar-nav">
+          <div className="sidebar-section">
+            <div className="sidebar-section-label">Navigation</div>
+            <button
+              className={`sidebar-item ${view.kind === "list" ? "active" : ""}`}
+              onClick={() => { setView({ kind: "list" }); setSidebarOpen(false); }}
+            >
+              <span className="icon">📋</span> All Episodes
+            </button>
+            <button
+              className={`sidebar-item ${view.kind === "new" ? "active" : ""}`}
+              onClick={() => { setView({ kind: "new" }); setSidebarOpen(false); }}
+            >
+              <span className="icon">➕</span> New Episode
+            </button>
+          </div>
+          {episodes.length > 0 && (
+            <div className="sidebar-section">
+              <div className="sidebar-section-label">Recent Episodes</div>
+              {episodes.slice(0, 10).map((e) => (
+                <button
+                  key={e.episode_id}
+                  className={`sidebar-item ${
+                    (view.kind === "episode" || view.kind === "idea") &&
+                    view.episodeId === e.episode_id
+                      ? "active"
+                      : ""
+                  }`}
+                  onClick={() => {
+                    setView({ kind: "episode", episodeId: e.episode_id });
+                    setSidebarOpen(false);
+                  }}
+                >
+                  <span className="icon">🎙</span>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {e.name}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </nav>
+        <div className="sidebar-footer">
+          Vyas-Video · Bhagavad Gita Reels
+        </div>
+      </aside>
 
-      {err && <div style={errStyle}>Error: {err}</div>}
+      {/* Overlay for mobile sidebar */}
+      {sidebarOpen && (
+        <div
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
+            zIndex: 99,
+          }}
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
 
-      {view.kind === "list" && (
-        <EpisodeList
-          onOpen={(id) => setView({ kind: "episode", episodeId: id })}
-          onNew={() => setView({ kind: "new" })}
-          run={run}
-          busy={busy}
-        />
-      )}
-      {view.kind === "new" && (
-        <NewEpisode
-          run={run}
-          busy={busy}
-          onCreated={(id) => setView({ kind: "episode", episodeId: id })}
-          onCancel={() => setView({ kind: "list" })}
-        />
-      )}
-      {view.kind === "episode" && (
-        <EpisodeView
-          episodeId={view.episodeId}
-          run={run}
-          busy={busy}
-          onBack={() => setView({ kind: "list" })}
-          onOpenIdea={(rank) =>
-            setView({ kind: "idea", episodeId: view.episodeId, rank })
-          }
-        />
-      )}
-      {view.kind === "idea" && (
-        <IdeaView
-          episodeId={view.episodeId}
-          rank={view.rank}
-          run={run}
-          busy={busy}
-          onBack={() => setView({ kind: "episode", episodeId: view.episodeId })}
-        />
-      )}
-    </main>
+      {/* Main content */}
+      <div className="main-content">
+        <div className="top-bar">
+          <button className="burger" onClick={() => setSidebarOpen(!sidebarOpen)}>
+            ☰
+          </button>
+          <div className="breadcrumb">
+            <span>{breadcrumb}</span>
+          </div>
+          {busy && (
+            <span style={{ marginLeft: "auto", color: "var(--accent)", fontSize: 12 }}>
+              Processing…
+            </span>
+          )}
+        </div>
+
+        <div className="content-area">
+          {err && <div className="error-banner">Error: {err}</div>}
+
+          {view.kind === "list" && (
+            <EpisodeList
+              onOpen={(id) => setView({ kind: "episode", episodeId: id })}
+              onNew={() => setView({ kind: "new" })}
+              run={run}
+              busy={busy}
+            />
+          )}
+          {view.kind === "new" && (
+            <NewEpisode
+              run={run}
+              busy={busy}
+              onCreated={(id) => {
+                refreshEpisodes();
+                setView({ kind: "episode", episodeId: id });
+              }}
+              onCancel={() => setView({ kind: "list" })}
+            />
+          )}
+          {view.kind === "episode" && (
+            <EpisodeView
+              episodeId={view.episodeId}
+              run={run}
+              busy={busy}
+              onBack={() => setView({ kind: "list" })}
+              onOpenIdea={(rank) =>
+                setView({ kind: "idea", episodeId: view.episodeId, rank })
+              }
+            />
+          )}
+          {view.kind === "idea" && (
+            <IdeaView
+              episodeId={view.episodeId}
+              rank={view.rank}
+              run={run}
+              busy={busy}
+              onBack={() => setView({ kind: "episode", episodeId: view.episodeId })}
+            />
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
 // ---------- Shared styles ----------
 
-const panelStyle: React.CSSProperties = {
-  background: "var(--panel)",
-  border: "1px solid var(--border)",
-  borderRadius: 12,
-  padding: 20,
-};
-const errStyle: React.CSSProperties = {
-  background: "#3a1d1d",
-  border: "1px solid #6b2b2b",
-  color: "#ff9999",
-  padding: 12,
-  borderRadius: 8,
-  marginBottom: 16,
-};
-const btn: React.CSSProperties = {
-  background: "var(--accent)",
-  color: "#1a1a1a",
-  border: 0,
-  padding: "10px 18px",
-  borderRadius: 8,
-  fontWeight: 700,
-  textDecoration: "none",
-  display: "inline-block",
-};
-const btnSecondary: React.CSSProperties = {
-  background: "transparent",
-  color: "var(--text)",
-  border: "1px solid var(--border)",
-  padding: "10px 18px",
-  borderRadius: 8,
-  textDecoration: "none",
-  display: "inline-block",
-};
+// Now using CSS classes from globals.css — these are kept as thin wrappers.
+const panelStyle: React.CSSProperties = {};  // → className="card"
+const btn: React.CSSProperties = {};         // → className="btn btn-primary"
+const btnSecondary: React.CSSProperties = {}; // → className="btn btn-secondary"
 const linkBtn: React.CSSProperties = {
-  background: "transparent",
-  color: "var(--accent)",
-  border: 0,
-  padding: 0,
-  cursor: "pointer",
+  background: "transparent", color: "var(--accent)", border: 0, padding: 0, cursor: "pointer",
 };
 
 // ---------- Episode list ----------
@@ -158,7 +217,7 @@ function EpisodeList({
   }, []);
 
   return (
-    <div style={panelStyle}>
+    <div className="card">
       <div
         style={{
           display: "flex",
@@ -168,7 +227,7 @@ function EpisodeList({
         }}
       >
         <h2 style={{ margin: 0 }}>Episodes</h2>
-        <button style={btn} onClick={onNew} disabled={busy}>
+        <button className="btn btn-primary" onClick={onNew} disabled={busy}>
           + New episode
         </button>
       </div>
@@ -290,7 +349,7 @@ function NewEpisode({
   const working = phase !== "idle" && phase !== "error" && phase !== "done";
 
   return (
-    <div style={panelStyle}>
+    <div className="card">
       <h2 style={{ marginTop: 0 }}>New episode</h2>
       <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: 12, marginBottom: 12 }}>
         <div>
@@ -365,10 +424,10 @@ function NewEpisode({
         </div>
       )}
       <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-        <button style={btn} disabled={!canSubmit} onClick={start}>
+        <button className="btn btn-primary" disabled={!canSubmit} onClick={start}>
           {working ? "Working…" : "Upload & generate ideas"}
         </button>
-        <button style={btnSecondary} onClick={onCancel} disabled={working}>
+        <button className="btn btn-secondary" onClick={onCancel} disabled={working}>
           Cancel
         </button>
       </div>
@@ -401,10 +460,10 @@ function EpisodeView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [episodeId]);
 
-  if (!ep) return <div style={panelStyle}>Loading…</div>;
+  if (!ep) return <div className="card">Loading…</div>;
 
   return (
-    <div style={panelStyle}>
+    <div className="card">
       <button onClick={onBack} style={linkBtn}>
         ← All episodes
       </button>
@@ -491,7 +550,7 @@ function IdeaRow({ idea, onOpen }: { idea: EpisodeIdea; onOpen: () => void }) {
           </div>
         </div>
       )}
-      <button style={btn} onClick={onOpen}>
+      <button className="btn btn-primary" onClick={onOpen}>
         Work on this idea
       </button>
     </div>
@@ -660,7 +719,7 @@ function IdeaView({
   };
 
   return (
-    <div style={panelStyle}>
+    <div className="card">
       <button onClick={onBack} style={linkBtn}>
         ← Back to episode
       </button>
@@ -671,7 +730,7 @@ function IdeaView({
           <p style={{ color: "var(--muted)" }}>
             No script yet for this idea.
           </p>
-          <button style={btn} onClick={gen} disabled={busy}>
+          <button className="btn btn-primary" onClick={gen} disabled={busy}>
             {busy ? "Writing…" : "Generate script"}
           </button>
         </div>
@@ -698,10 +757,7 @@ function IdeaView({
                   }}
                 >
                   <div style={{ color: "var(--muted)", fontSize: 12, display: "flex", gap: 8, marginBottom: 6 }}>
-                    <span style={{
-                      background: beat.purpose === "hook" ? "#7a2d2d" : beat.purpose === "twist" ? "#2d5a7a" : beat.purpose === "payoff" ? "#2d7a2d" : "#444",
-                      color: "white", fontSize: 10, padding: "2px 6px", borderRadius: 999, fontWeight: 700, textTransform: "uppercase",
-                    }}>{beat.purpose}</span>
+                    <span className={`chip chip-${beat.purpose || "build"}`}>{beat.purpose}</span>
                     <span>beat {bi + 1} · {beat.start.toFixed(0)}–{beat.end.toFixed(0)}s</span>
                     {typeof beat.source_start === "number" && typeof beat.source_end === "number" && (
                       <span style={{ color: "var(--accent)" }}>
@@ -755,17 +811,17 @@ function IdeaView({
             />
             <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
               <button
-                style={btnSecondary}
+                className="btn btn-secondary"
                 disabled={busy || !reviseInput.trim()}
                 onClick={doRevise}
               >
                 {busy ? "Revising…" : "Apply revision"}
               </button>
-              <button style={btnSecondary} disabled={busy} onClick={gen}>
+              <button className="btn btn-secondary" disabled={busy} onClick={gen}>
                 Regenerate from scratch
               </button>
               <button
-                style={btn}
+                className="btn btn-primary"
                 disabled={busy || renderStatus === "RENDERING"}
                 onClick={doRender}
               >
@@ -847,17 +903,17 @@ function Publish({ script, mp4Url }: { script: ScriptResponse; mp4Url: string })
             }}
           />
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <a href={mp4Url} download="reel.mp4" style={btn}>
+            <a href={mp4Url} download="reel.mp4" className="btn btn-primary">
               Download MP4
             </a>
-            <button style={btnSecondary} onClick={() => copy(caption)}>
+            <button className="btn btn-secondary" onClick={() => copy(caption)}>
               Copy caption
             </button>
-            <button style={btnSecondary} onClick={() => copy(tags)}>
+            <button className="btn btn-secondary" onClick={() => copy(tags)}>
               Copy hashtags
             </button>
             <a
-              style={btnSecondary}
+              className="btn btn-secondary"
               href="https://studio.youtube.com/"
               target="_blank"
               rel="noreferrer"
@@ -865,7 +921,7 @@ function Publish({ script, mp4Url }: { script: ScriptResponse; mp4Url: string })
               YouTube Studio
             </a>
             <a
-              style={btnSecondary}
+              className="btn btn-secondary"
               href="https://www.instagram.com/"
               target="_blank"
               rel="noreferrer"
