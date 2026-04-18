@@ -594,10 +594,11 @@ def get_episode(episode_id: int) -> dict[str, Any]:
 
     def _status_for(rank: int) -> tuple[bool, str | None, str | None, str | None, str | None]:
         pk = _ep_pk(episode_id)
-        # "has_script" means a READY script exists (not just an in-flight placeholder).
         s_ready = _latest_ready_script(episode_id, rank)
         s_any = _latest(f"IDEA#{rank}#SCRIPT#", pk)
         r = _latest(f"IDEA#{rank}#RENDER#", pk)
+        if r:
+            r = _sync_render_status(r, pk)
         script_status = None
         if s_any:
             script_status = s_any.get("status") or (
@@ -1012,16 +1013,65 @@ def render(episode_id: int, rank: int) -> dict[str, str]:
     return {"execution_arn": execution["executionArn"], "status": "RENDERING", "version": version}
 
 
+def _sync_render_status(r: dict[str, Any], pk: str) -> dict[str, Any]:
+    """If the DDB render item is stuck at RENDERING, check the underlying Step
+    Function execution. If it's FAILED/TIMED_OUT/ABORTED, flip DDB to
+    RENDER_FAILED with a reason. Prevents forever-RENDERING UI state."""
+    if r.get("status") != "RENDERING":
+        return r
+    arn = r.get("execution_arn")
+    if not arn:
+        return r
+    try:
+        desc = _sfn.describe_execution(executionArn=arn)
+    except Exception as e:
+        print(f"[render-status] describe_execution failed: {e}")
+        return r
+    sfn_status = desc.get("status")
+    if sfn_status == "SUCCEEDED":
+        # Pack Lambda should've flipped status to READY — but if it crashed
+        # after SFn succeeded, we'd see this. Treat as failure.
+        if not r.get("mp4_key"):
+            _ddb.update_item(
+                Key={"pk": pk, "sk": r["sk"]},
+                UpdateExpression="SET #s = :s, failure_reason = :rr",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={
+                    ":s": "RENDER_FAILED",
+                    ":rr": "Pipeline completed but no MP4 produced",
+                },
+            )
+            r["status"] = "RENDER_FAILED"
+            r["failure_reason"] = "Pipeline completed but no MP4 produced"
+    elif sfn_status in ("FAILED", "TIMED_OUT", "ABORTED"):
+        cause = desc.get("cause", "")[:400] or desc.get("error", sfn_status)
+        _ddb.update_item(
+            Key={"pk": pk, "sk": r["sk"]},
+            UpdateExpression="SET #s = :s, failure_reason = :rr",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":s": "RENDER_FAILED",
+                ":rr": cause,
+            },
+        )
+        r["status"] = "RENDER_FAILED"
+        r["failure_reason"] = cause
+    return r
+
+
 @app.get("/episodes/{episode_id}/ideas/{rank}/render-status")
 def render_status(episode_id: int, rank: int) -> dict[str, Any]:
-    r = _latest(f"IDEA#{rank}#RENDER#", _ep_pk(episode_id))
+    pk = _ep_pk(episode_id)
+    r = _latest(f"IDEA#{rank}#RENDER#", pk)
     if not r:
         return {"status": "NONE"}
+    r = _sync_render_status(r, pk)
     return {
         "status": r.get("status"),
         "mp4_key": r.get("mp4_key"),
         "execution_arn": r.get("execution_arn"),
         "version": r["sk"].rsplit("#", 1)[-1],
+        "failure_reason": r.get("failure_reason"),
     }
 
 

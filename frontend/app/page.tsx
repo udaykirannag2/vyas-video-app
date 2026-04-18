@@ -510,6 +510,12 @@ function IdeaRow({ idea, onOpen }: { idea: EpisodeIdea; onOpen: () => void }) {
       return <Chip color="#2d7a2d">video ready</Chip>;
     if (idea.render_status === "RENDERING")
       return <Chip color="#7a5a2d">rendering…</Chip>;
+    if (idea.render_status === "RENDER_FAILED")
+      return <Chip color="#c0392b">render failed</Chip>;
+    if (idea.script_status === "GENERATING")
+      return <Chip color="#2980b9">writing…</Chip>;
+    if (idea.script_status === "SCRIPT_FAILED")
+      return <Chip color="#c0392b">script failed</Chip>;
     if (idea.has_script) return <Chip color="#2d5a7a">script ready</Chip>;
     return <Chip color="#444">not started</Chip>;
   })();
@@ -638,6 +644,7 @@ function IdeaView({
 }) {
   const [script, setScript] = useState<ScriptResponse | null>(null);
   const [scriptVersion, setScriptVersion] = useState<string | null>(null);
+  const [scriptError, setScriptError] = useState<string | null>(null);
   const [reviseInput, setReviseInput] = useState("");
   const [renderStatus, setRenderStatus] = useState<string | null>(null);
   const [mp4Url, setMp4Url] = useState<string | null>(null);
@@ -654,14 +661,21 @@ function IdeaView({
       setRenderStatus(idea.render_status);
       setScriptVersion(idea.script_version);
 
-      // Check script state: READY, GENERATING, or NONE.
+      // Check script state: READY, GENERATING, SCRIPT_FAILED, or NONE.
       const scriptStat = idea.script_status;
       if (scriptStat === "GENERATING") {
-        // Resume polling — script is being generated in the background.
         await run(async () => {
-          await pollScriptUntilReady();
+          try {
+            await pollScriptUntilReady();
+          } catch (e: unknown) {
+            setScriptError(e instanceof Error ? e.message : String(e));
+          }
           return true;
         });
+      } else if (scriptStat === "SCRIPT_FAILED") {
+        // Fetch the failure reason from script-status endpoint.
+        const ss = await api.scriptStatus(episodeId, rank).catch(() => null);
+        setScriptError(ss?.failure_reason ?? "Unknown error");
       } else if (idea.has_script) {
         const s = await run(() => api.getScript(episodeId, rank));
         if (s && !cancelled && isReadyScript(s)) setScript(s);
@@ -681,6 +695,8 @@ function IdeaView({
   const audioForBeat = (i: number): SceneAudio | undefined =>
     script?.scene_audio?.find((a) => a.index === i);
 
+  const [renderError, setRenderError] = useState<string | null>(null);
+
   const pollRender = async () => {
     const tick = async () => {
       const s = await api.renderStatus(episodeId, rank).catch(() => null);
@@ -689,6 +705,11 @@ function IdeaView({
       if (s.status === "READY" && s.mp4_key) {
         const u = await api.assetUrl(s.mp4_key);
         setMp4Url(u.url);
+        setRenderError(null);
+        return;
+      }
+      if (s.status === "RENDER_FAILED") {
+        setRenderError(s.failure_reason ?? "Unknown error");
         return;
       }
       if (s.status === "RENDERING") setTimeout(tick, 5000);
@@ -715,9 +736,15 @@ function IdeaView({
   };
 
   const gen = async () => {
+    setScriptError(null);
     const ok = await run(async () => {
       await api.generateScript(episodeId, rank);
-      await pollScriptUntilReady();
+      try {
+        await pollScriptUntilReady();
+      } catch (e: unknown) {
+        setScriptError(e instanceof Error ? e.message : String(e));
+        throw e;
+      }
       return true;
     });
     if (!ok) setScript(null);
@@ -725,15 +752,23 @@ function IdeaView({
 
   const doRevise = async () => {
     if (!reviseInput.trim()) return;
+    setScriptError(null);
     const ok = await run(async () => {
       await api.revise(episodeId, rank, reviseInput);
-      await pollScriptUntilReady();
+      try {
+        await pollScriptUntilReady();
+      } catch (e: unknown) {
+        setScriptError(e instanceof Error ? e.message : String(e));
+        throw e;
+      }
       return true;
     });
     if (ok) setReviseInput("");
   };
 
   const doRender = async () => {
+    setRenderError(null);
+    setMp4Url(null);
     const r = await run(() => api.render(episodeId, rank));
     if (r) {
       setRenderStatus(r.status);
@@ -748,7 +783,41 @@ function IdeaView({
       </button>
       <h2 style={{ margin: "8px 0 4px" }}>Idea #{rank}</h2>
 
-      {!script && (
+      {!script && scriptError && (
+        <div
+          style={{
+            marginTop: 12,
+            padding: 14,
+            border: "1px solid rgba(255,71,87,0.3)",
+            background: "rgba(255,71,87,0.08)",
+            borderRadius: 8,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <span className="chip" style={{ background: "var(--danger)" }}>FAILED</span>
+            <b style={{ color: "#ff8591" }}>Script generation failed</b>
+          </div>
+          <div
+            style={{
+              color: "var(--muted)",
+              fontSize: 13,
+              marginBottom: 12,
+              maxHeight: 120,
+              overflow: "auto",
+              fontFamily: "ui-monospace, monospace",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+            }}
+          >
+            {scriptError}
+          </div>
+          <button className="btn btn-primary" onClick={gen} disabled={busy}>
+            {busy ? "Retrying…" : "Retry"}
+          </button>
+        </div>
+      )}
+
+      {!script && !scriptError && (
         <div style={{ marginTop: 12 }}>
           <p style={{ color: "var(--muted)" }}>
             No script yet for this idea.
@@ -857,8 +926,44 @@ function IdeaView({
 
       {renderStatus === "RENDERING" && (
         <p style={{ marginTop: 16, color: "var(--muted)" }}>
-          Rendering in progress — TTS → b-roll → Remotion → packaging (~1–3 min).
+          Rendering in progress — audio slice → b-roll → Remotion → packaging (~5–7 min).
         </p>
+      )}
+
+      {renderStatus === "RENDER_FAILED" && (
+        <div
+          style={{
+            marginTop: 16,
+            padding: 14,
+            border: "1px solid rgba(255,71,87,0.3)",
+            background: "rgba(255,71,87,0.08)",
+            borderRadius: 8,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <span className="chip" style={{ background: "var(--danger)" }}>FAILED</span>
+            <b style={{ color: "#ff8591" }}>Render failed</b>
+          </div>
+          {renderError && (
+            <div
+              style={{
+                color: "var(--muted)",
+                fontSize: 13,
+                marginBottom: 12,
+                maxHeight: 120,
+                overflow: "auto",
+                fontFamily: "ui-monospace, monospace",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+              }}
+            >
+              {renderError}
+            </div>
+          )}
+          <button className="btn btn-primary" onClick={doRender} disabled={busy}>
+            {busy ? "…" : "Retry render"}
+          </button>
+        </div>
       )}
 
       {renderStatus === "READY" && mp4Url && script && (

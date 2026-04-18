@@ -183,7 +183,7 @@ export const api = {
       { method: "POST" },
     ),
   renderStatus: (id: string, rank: number) =>
-    req<{ status: string; mp4_key?: string; version?: string }>(
+    req<{ status: string; mp4_key?: string; version?: string; failure_reason?: string }>(
       `/episodes/${id}/ideas/${rank}/render-status`,
     ),
   assetUrl: (key: string) =>
