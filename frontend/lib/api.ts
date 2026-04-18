@@ -107,14 +107,34 @@ async function req<T>(
   path: string,
   opts: RequestInit = {},
 ): Promise<T> {
-  const token = await getIdToken();
+  const url = `${API_URL}${path}`;
+  let token: string | null = null;
+  try {
+    token = await getIdToken();
+  } catch (e: unknown) {
+    throw new Error(
+      `Auth token fetch failed: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
   const headers: Record<string, string> = {
     "content-type": "application/json",
     ...(opts.headers as Record<string, string> | undefined),
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  const r = await fetch(`${API_URL}${path}`, { ...opts, headers });
-  if (!r.ok) throw new Error(`${path} ${r.status}: ${await r.text()}`);
+
+  let r: Response;
+  try {
+    r = await fetch(url, { ...opts, headers });
+  } catch (e: unknown) {
+    const hint = token ? "token attached" : "NO TOKEN — sign-in may not have completed";
+    throw new Error(
+      `Network error hitting ${url} (${hint}): ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error(`${path} ${r.status}: ${body}`);
+  }
   return r.json();
 }
 

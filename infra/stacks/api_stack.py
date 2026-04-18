@@ -116,7 +116,20 @@ class ApiStack(Stack):
             cors_preflight=apigw.CorsPreflightOptions(
                 allow_methods=[apigw.CorsHttpMethod.ANY],
                 allow_origins=["*"],
-                allow_headers=["*", "Authorization"],
+                # API Gateway HTTP API does NOT honor "*" as a wildcard in
+                # AllowHeaders — when the browser preflight requests headers
+                # not in this explicit list, the CORS response is empty and
+                # the browser shows "Failed to fetch." Enumerate every
+                # header the app actually sends.
+                allow_headers=[
+                    "Authorization",
+                    "Content-Type",
+                    "Accept",
+                    "X-Amz-Date",
+                    "X-Amz-Security-Token",
+                    "X-Api-Key",
+                    "X-Requested-With",
+                ],
             ),
         )
 
