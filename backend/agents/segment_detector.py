@@ -43,8 +43,9 @@ REJECT a segment if:
 PREFER segments where the host says something a 25-year-old dealing with
 anxiety, comparison, or imposter syndrome would screenshot.
 
-Duration: 20-120 seconds (roughly 6-35 segments). Let topic completeness
-dictate length.
+Duration: 20-180 seconds (roughly 6-55 segments). HARD MAX: 180 seconds
+(the 3-minute cap for YouTube Shorts and Instagram Reels). Let topic
+completeness dictate length within that cap.
 
 Return a JSON array of objects, each with:
   start_seg: integer — the [N] index where this topic begins

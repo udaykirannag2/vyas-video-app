@@ -398,11 +398,24 @@ def _run_ideation(episode_id: int) -> None:
         glog(f"[ideation] step 2: {len(topic_segments)} topic candidates")
 
         # Build candidate list with full text + timestamps.
+        # Hard cap at 180 seconds (YouTube Shorts / Instagram Reels limit).
+        # If the LLM picked an end_seg that puts the window over 180s, walk
+        # back to the last segment that fits.
+        MAX_REEL_SEC = 180.0
         candidates = []
         for i, ts in enumerate(topic_segments):
             s_idx = int(ts["start_seg"])
             e_idx = int(ts["end_seg"])
+            # Shrink the window if it exceeds the platform cap.
+            while e_idx > s_idx:
+                audio_start, audio_end, _ = segments_for_range(clean_segs, s_idx, e_idx)
+                if (audio_end - audio_start) <= MAX_REEL_SEC:
+                    break
+                e_idx -= 1
             audio_start, audio_end, original_text = segments_for_range(clean_segs, s_idx, e_idx)
+            dur = audio_end - audio_start
+            if dur > MAX_REEL_SEC:
+                glog(f"[ideation] ⚠ candidate {i} exceeds {MAX_REEL_SEC}s even after trim ({dur:.0f}s)")
             candidates.append({
                 "clip_id": i,
                 "topic": ts.get("topic", ""),
@@ -410,7 +423,7 @@ def _run_ideation(episode_id: int) -> None:
                 "end_seg": e_idx,
                 "audio_start": audio_start,
                 "audio_end": audio_end,
-                "duration_sec": round(audio_end - audio_start),
+                "duration_sec": round(dur),
                 "text": original_text,
             })
 
@@ -782,20 +795,37 @@ def _with_visual_director(screenplay: Screenplay) -> Screenplay:
         return screenplay
 
 
+MAX_REEL_DURATION_SEC = 180.0  # YouTube Shorts / Instagram Reels cap
+
+
 def _align_beat_timelines(screenplay: Screenplay) -> Screenplay:
     """Force reel timeline to equal source spans, beat by beat.
 
-    Also validates shot durations tile across each beat's duration.
+    Also enforces the 180-second platform cap by truncating trailing beats
+    (and/or shrinking the last included beat) so the reel fits within
+    YouTube Shorts / Instagram Reels duration limits.
     """
     t = 0.0
+    kept_beats = []
     for i, beat in enumerate(screenplay.beats):
         if beat.source_start is None or beat.source_end is None:
             dur = max(0.5, float(beat.end) - float(beat.start))
         else:
             dur = max(0.5, float(beat.source_end) - float(beat.source_start))
+
+        remaining = MAX_REEL_DURATION_SEC - t
+        if remaining <= 0.5:
+            print(f"[align] ⚠ dropping beat {i+1} — reel already at {t:.0f}s (cap {MAX_REEL_DURATION_SEC:.0f}s)")
+            continue
+        if dur > remaining:
+            # Trim this beat to fit within the cap.
+            print(f"[align] trimming beat {i+1} from {dur:.1f}s to {remaining:.1f}s to stay under 180s")
+            dur = remaining
+            if beat.source_start is not None:
+                beat.source_end = float(beat.source_start) + dur
+
         beat.start = round(t, 2)
         beat.end = round(t + dur, 2)
-        # Normalize shot durations to tile across beat duration.
         if beat.shots:
             shot_total = sum(s.shot_duration_sec for s in beat.shots)
             if shot_total > 0 and abs(shot_total - dur) > 0.5:
@@ -803,7 +833,12 @@ def _align_beat_timelines(screenplay: Screenplay) -> Screenplay:
                 for s in beat.shots:
                     s.shot_duration_sec = round(s.shot_duration_sec * scale, 2)
         t += dur
+        kept_beats.append(beat)
+
+    screenplay.beats = kept_beats
     screenplay.duration_sec = int(round(t))
+    if t > MAX_REEL_DURATION_SEC:
+        print(f"[align] ⚠ final duration {t:.1f}s exceeds {MAX_REEL_DURATION_SEC:.0f}s cap")
 
     # Continuity check.
     for i in range(1, len(screenplay.beats)):

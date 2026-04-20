@@ -25,7 +25,7 @@ INPUT: The plain text transcript of a podcast episode.
 
 YOUR JOB:
 Find 2 or 3 passages in the transcript that would each make a great
-reel. The clip can be 30s to 120s — let the topic dictate length. For each, identify:
+reel. The clip can be 30s to 180s — let the topic dictate length. For each, identify:
 
   1. `start_phrase` — the FIRST 6-10 words of the passage, copied exactly
      from the transcript. This is where the topic BEGINS (the hook/setup).
@@ -70,8 +70,9 @@ NARRATIVE ARC — for each idea, also identify these lines from the passage:
     with. Should feel like a resolution.
   Copy these EXACTLY from the transcript (verbatim).
 
-LENGTH: Let the topic dictate the clip length (30-120 seconds). Complete
-topics can be long — don't artificially shorten.
+LENGTH: Let the topic dictate the clip length (30-180 seconds). Complete
+topics can be long — don't artificially shorten. HARD MAX: 180 seconds
+(3 minutes — the limit for YouTube Shorts and Instagram Reels).
 
 Set window_start, window_end to 0 (code fills them). Set window_text to ""
 (code fills it). Set quotes to empty list (deprecated).
