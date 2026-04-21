@@ -1017,6 +1017,18 @@ def render(episode_id: int, rank: int) -> dict[str, str]:
     if not scene_audio:
         raise HTTPException(400, "script has no scene_audio; regenerate the script")
 
+    # Regenerate presigned URLs for every scene — the URLs stored in the
+    # script have a 2-hour TTL and may have expired (especially on retry
+    # renders). Remotion fails with "Error while downloading" otherwise.
+    for entry in scene_audio:
+        key = entry.get("audio_key")
+        if key:
+            entry["audio_url"] = _s3.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": BUCKET, "Key": key},
+                ExpiresIn=60 * 60 * 4,  # 4 hours — long enough for the render
+            )
+
     version = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     script_key = f"episodes/{episode_id}/idea-{rank}/script-{version}.json"
     body = current["screenplay"] if isinstance(current["screenplay"], str) else json.dumps(current["screenplay"])

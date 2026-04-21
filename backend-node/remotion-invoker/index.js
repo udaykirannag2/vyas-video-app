@@ -116,8 +116,6 @@ exports.handler = async (event) => {
 
 // The Step Functions pipeline already fetches the script JSON in tts/broll,
 // but the render Lambda runs in its own invocation so we re-fetch here from S3.
-const { GetObjectCommand } = require("@aws-sdk/client-s3");
-
 async function fetchScript(event) {
   const { script_s3_key } = event;
   const res = await s3.send(
