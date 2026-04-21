@@ -6,6 +6,7 @@
   "main": "index.js",
   "dependencies": {
     "@remotion/lambda": "4.0.220",
-    "@aws-sdk/client-s3": "^3.645.0"
+    "@aws-sdk/client-s3": "^3.645.0",
+    "@aws-sdk/s3-request-presigner": "^3.645.0"
   }
 }

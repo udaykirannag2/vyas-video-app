@@ -4,12 +4,20 @@ const {
   renderMediaOnLambda,
   getRenderProgress,
 } = require("@remotion/lambda/client");
-const { S3Client, CopyObjectCommand } = require("@aws-sdk/client-s3");
+const {
+  S3Client,
+  CopyObjectCommand,
+  GetObjectCommand,
+} = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 const REGION = process.env.AWS_REGION || "us-east-1";
 const FUNCTION_NAME = process.env.REMOTION_FUNCTION_NAME;
 const SERVE_URL = process.env.REMOTION_SERVE_URL;
 const ASSETS_BUCKET = process.env.ASSETS_BUCKET;
+// Branded outro clip appended to every reel (4.88s, 720x1280, with audio).
+const OUTRO_KEY = process.env.OUTRO_KEY || "shared/outro-v1.mp4";
+const OUTRO_DURATION_SEC = Number(process.env.OUTRO_DURATION_SEC || "4.88");
 
 if (!FUNCTION_NAME) throw new Error("REMOTION_FUNCTION_NAME not set");
 if (!SERVE_URL) throw new Error("REMOTION_SERVE_URL not set");
@@ -22,6 +30,14 @@ exports.handler = async (event) => {
   const prefix = `episodes/${episode_id}/idea-${idea_rank}/render-${version}`;
   const outputKey = `${prefix}/final.mp4`;
 
+  // Presign the outro so Remotion's headless Chromium can GET it (the
+  // assets bucket is private).
+  const outroUrl = await getSignedUrl(
+    s3,
+    new GetObjectCommand({ Bucket: ASSETS_BUCKET, Key: OUTRO_KEY }),
+    { expiresIn: 2 * 60 * 60 },
+  );
+
   // Build the Remotion inputProps the <Reel /> composition expects.
   const inputProps = {
     script: await fetchScript(event),
@@ -32,6 +48,9 @@ exports.handler = async (event) => {
     // Multi-shot broll (new) + legacy compat
     shotBroll: event.shot_broll || event.scene_broll || [],
     sceneBroll: event.scene_broll || event.shot_broll || [],
+    // Outro clip appended to every reel
+    outroUrl,
+    outroDurationSec: OUTRO_DURATION_SEC,
   };
 
   // 1. Kick off render — SDK handles all version/payload wiring.

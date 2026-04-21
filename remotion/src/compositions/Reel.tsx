@@ -3,6 +3,7 @@ import {
   AbsoluteFill,
   Sequence,
   Audio,
+  OffthreadVideo,
   useVideoConfig,
 } from "remotion";
 import { TextOverlay } from "../components/TextOverlay";
@@ -65,6 +66,9 @@ export interface ReelProps {
   sceneBroll?: ShotBroll[];
   assetsBucket: string;
   projectId: string;
+  // Outro: branded clip appended to every reel (optional).
+  outroUrl?: string | null;
+  outroDurationSec?: number;
 }
 
 const s3Url = (bucket: string, key: string) =>
@@ -76,10 +80,16 @@ export const Reel: React.FC<ReelProps> = ({
   shotBroll,
   sceneBroll,
   assetsBucket,
+  outroUrl,
+  outroDurationSec = 5,
 }) => {
   const { fps } = useVideoConfig();
   const beats = script.beats?.length ? script.beats : [];
   const allBroll = shotBroll?.length ? shotBroll : sceneBroll || [];
+  // Where the outro starts = end of the last beat.
+  const lastBeatEnd = beats.length ? beats[beats.length - 1].end : 0;
+  const outroStartFrame = Math.round(lastBeatEnd * fps);
+  const outroDurationFrames = Math.max(1, Math.round(outroDurationSec * fps));
 
   // Build a flat shot index matching the global_id pattern "b{beatIdx}_s{shotIdx}"
   let globalShotIdx = 0;
@@ -181,6 +191,23 @@ export const Reel: React.FC<ReelProps> = ({
           </Sequence>
         );
       })}
+
+      {/* Outro — branded end-card appended to every reel. The outro has
+          its own baked-in audio, so no separate <Audio> needed. */}
+      {outroUrl && (
+        <Sequence
+          from={outroStartFrame}
+          durationInFrames={outroDurationFrames}
+          name="outro"
+        >
+          <AbsoluteFill style={{ backgroundColor: "black" }}>
+            <OffthreadVideo
+              src={outroUrl}
+              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            />
+          </AbsoluteFill>
+        </Sequence>
+      )}
     </AbsoluteFill>
   );
 };
