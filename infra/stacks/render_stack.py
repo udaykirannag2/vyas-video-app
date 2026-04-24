@@ -111,7 +111,7 @@ class RenderStack(Stack):
         # Remotion function + serve URL are created by `pnpm exec remotion lambda …`
         # and injected here. Override via CDK context if they change.
         remotion_fn_name = self.node.try_get_context("remotionFunctionName") or (
-            "remotion-render-4-0-220-mem2048mb-disk2048mb-300sec"
+            "remotion-render-4-0-220-mem3008mb-disk4096mb-600sec"
         )
         remotion_serve_url = self.node.try_get_context("remotionServeUrl") or (
             "https://remotionlambda-REPLACE_WITH_YOUR_BUCKET.s3.us-east-1.amazonaws.com/sites/vyas-video/index.html"

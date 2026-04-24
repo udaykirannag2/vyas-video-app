@@ -93,12 +93,17 @@ exports.handler = async (event) => {
     outName: outputKey,
     privacy: "private",
     maxRetries: 1,
-    framesPerLambda: 300,
+    // 150 frames = 5-second chunks at 30fps. Was 300 (10s) but individual
+    // chunks timed out at the Remotion Lambda 300s timeout when rendering
+    // heavy b-roll. Smaller chunks = less work per chunk. Still few enough
+    // to avoid the 6MB aggregated-response TruncatedResponse.
+    framesPerLambda: 150,
   });
   console.log("renderId", renderId, "bucket", bucketName);
 
-  // 2. Poll until done or a 12-minute soft deadline.
-  const deadline = Date.now() + 12 * 60 * 1000;
+  // 2. Poll until done or a 14-minute soft deadline (leaves buffer under the
+  // invoker Lambda's own 15-min hard timeout).
+  const deadline = Date.now() + 14 * 60 * 1000;
   let progress;
   while (Date.now() < deadline) {
     progress = await getRenderProgress({
