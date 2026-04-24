@@ -12,6 +12,13 @@ from aws_cdk import (
     aws_dynamodb as ddb,
 )
 from constructs import Construct
+import os
+import sys
+
+# Import RenderBudget from backend/guardrails.py as the single source of
+# truth for all render resource limits.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "backend"))
+from guardrails import RenderBudget  # type: ignore
 
 from .bundling import backend_code, node_code
 
@@ -107,12 +114,19 @@ class RenderStack(Stack):
             )
         )
 
-        # Remotion render invoker (calls @remotion/lambda render function)
-        # Remotion function + serve URL are created by `pnpm exec remotion lambda …`
-        # and injected here. Override via CDK context if they change.
-        remotion_fn_name = self.node.try_get_context("remotionFunctionName") or (
-            "remotion-render-4-0-220-mem3008mb-disk4096mb-600sec"
+        # Remotion render invoker (calls @remotion/lambda render function).
+        # Remotion Lambda is deployed by `pnpm exec remotion lambda functions
+        # deploy` using the resource limits defined in RenderBudget below.
+        # The function name encodes those limits (mem{MB}mb-disk{MB}mb-{S}sec),
+        # so we derive the expected name from RenderBudget.
+        budget = RenderBudget()
+        expected_fn_name = (
+            f"remotion-render-4-0-220-"
+            f"mem{budget.remotion_lambda_memory_mb}mb-"
+            f"disk{budget.remotion_lambda_disk_mb}mb-"
+            f"{budget.remotion_lambda_timeout_sec}sec"
         )
+        remotion_fn_name = self.node.try_get_context("remotionFunctionName") or expected_fn_name
         remotion_serve_url = self.node.try_get_context("remotionServeUrl") or (
             "https://remotionlambda-REPLACE_WITH_YOUR_BUCKET.s3.us-east-1.amazonaws.com/sites/vyas-video/index.html"
         )
@@ -132,6 +146,11 @@ class RenderStack(Stack):
                 **common_env,
                 "REMOTION_FUNCTION_NAME": remotion_fn_name,
                 "REMOTION_SERVE_URL": remotion_serve_url,
+                # Render budget knobs sourced from backend/guardrails.py.
+                # Changing the numbers there updates both CDK + invoker.
+                "FRAMES_PER_CHUNK": str(budget.frames_per_chunk),
+                "INVOKER_POLL_DEADLINE_SEC": str(budget.invoker_poll_deadline_sec),
+                "INPUT_PROPS_MAX_BYTES": str(budget.input_props_max_bytes),
             },
         )
         render_fn.add_to_role_policy(

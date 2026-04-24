@@ -19,6 +19,12 @@ const ASSETS_BUCKET = process.env.ASSETS_BUCKET;
 const OUTRO_KEY = process.env.OUTRO_KEY || "shared/outro-v1.mp4";
 const OUTRO_DURATION_SEC = Number(process.env.OUTRO_DURATION_SEC || "4.88");
 
+// Render budget — sourced from backend/guardrails.py via CDK env vars.
+// Single source of truth: RenderBudget dataclass.
+const FRAMES_PER_CHUNK = Number(process.env.FRAMES_PER_CHUNK || "150");
+const POLL_DEADLINE_SEC = Number(process.env.INVOKER_POLL_DEADLINE_SEC || "840");
+const INPUT_PROPS_MAX_BYTES = Number(process.env.INPUT_PROPS_MAX_BYTES || "10000");
+
 if (!FUNCTION_NAME) throw new Error("REMOTION_FUNCTION_NAME not set");
 if (!SERVE_URL) throw new Error("REMOTION_SERVE_URL not set");
 if (!ASSETS_BUCKET) throw new Error("ASSETS_BUCKET not set");
@@ -93,17 +99,25 @@ exports.handler = async (event) => {
     outName: outputKey,
     privacy: "private",
     maxRetries: 1,
-    // 150 frames = 5-second chunks at 30fps. Was 300 (10s) but individual
-    // chunks timed out at the Remotion Lambda 300s timeout when rendering
-    // heavy b-roll. Smaller chunks = less work per chunk. Still few enough
-    // to avoid the 6MB aggregated-response TruncatedResponse.
-    framesPerLambda: 150,
+    // Chunk size from RenderBudget.frames_per_chunk (backend/guardrails.py).
+    framesPerLambda: FRAMES_PER_CHUNK,
   });
+
+  // Guardrail: warn if inputProps grew past the budget — risks
+  // Runtime.TruncatedResponse when chunks replicate it.
+  const propsSize = JSON.stringify(inputProps).length;
+  if (propsSize > INPUT_PROPS_MAX_BYTES) {
+    console.warn(
+      `[render] ⚠ inputProps size ${propsSize}B exceeds guardrail ` +
+      `${INPUT_PROPS_MAX_BYTES}B — TruncatedResponse risk`,
+    );
+  } else {
+    console.log(`[render] inputProps size ${propsSize}B (budget ${INPUT_PROPS_MAX_BYTES}B)`);
+  }
   console.log("renderId", renderId, "bucket", bucketName);
 
-  // 2. Poll until done or a 14-minute soft deadline (leaves buffer under the
-  // invoker Lambda's own 15-min hard timeout).
-  const deadline = Date.now() + 14 * 60 * 1000;
+  // 2. Poll until done or the RenderBudget poll deadline.
+  const deadline = Date.now() + POLL_DEADLINE_SEC * 1000;
   let progress;
   while (Date.now() < deadline) {
     progress = await getRenderProgress({

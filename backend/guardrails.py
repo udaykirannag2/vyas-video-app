@@ -20,6 +20,9 @@ Or as a decorator:
     def write_script(idea, timed):
         ...
 """
+# Allow PEP 604 `X | None` union syntax to parse on Python 3.9 (CDK's venv).
+from __future__ import annotations
+
 import hashlib
 import json
 import time
@@ -30,6 +33,47 @@ T = TypeVar("T")
 
 
 # ---- Configuration ----
+
+@dataclass
+class RenderBudget:
+    """Resource limits for the Remotion render pipeline.
+
+    These were previously scattered as magic numbers across render_stack.py,
+    backend-node/remotion-invoker/index.js, and broll.py. Centralizing here
+    so:
+      - Changes are deliberate (rationale in-line with the value)
+      - CDK + invoker + broll read from ONE source of truth
+      - Tuning is visible (grep for RenderBudget to see every knob)
+    """
+
+    # Remotion Lambda (per-chunk renderer) — beefed up after chunks with
+    # heavy b-roll timed out at 300s/2GB. Each chunk renders frames_per_chunk
+    # frames; at 30fps, 150 frames = 5s of video per chunk.
+    remotion_lambda_memory_mb: int = 3008     # more CPU = faster per frame
+    remotion_lambda_disk_mb: int = 4096       # room for b-roll caching
+    remotion_lambda_timeout_sec: int = 600    # 10 min ceiling per chunk
+    frames_per_chunk: int = 150               # 5s chunks @ 30fps
+
+    # Invoker Lambda (orchestrator, polls chunks until done).
+    # Must be less than its own Lambda timeout of 15 min.
+    invoker_poll_deadline_sec: int = 840      # 14 min
+
+    # Input props budget — Remotion replicates inputProps across every chunk,
+    # so large props + many chunks → 6MB Lambda response cap breaches
+    # (Runtime.TruncatedResponse). Invoker warns if the slim payload drifts.
+    input_props_max_bytes: int = 10_000       # ~10KB target
+
+    # Per-reel Nova Reel shot cap — 30 Nova clips costs ~$14 and takes
+    # forever. We only generate Nova for the primary shot of each beat,
+    # but cap the total in case of prompt drift.
+    max_nova_shots_per_reel: int = 15
+
+    # Reel length — platforms reject >3 min.
+    max_reel_duration_sec: int = 180          # YouTube Shorts / IG Reels
+
+    # Step Functions overall execution budget.
+    render_pipeline_max_duration_sec: int = 1500  # 25 min hard ceiling
+
 
 @dataclass
 class GuardrailsConfig:
@@ -54,11 +98,11 @@ class GuardrailsConfig:
     breaker_cooldown_sec: float = 60.0
 
     # -- Loop prevention --
-    # Abort only if the SAME output appears 4+ times (was 2, too aggressive —
-    # transient-retry with deterministic low-temp prompts can legitimately
-    # produce the same output twice).
     max_identical_outputs: int = 4
     max_schema_repair_attempts: int = 2  # structured_output retries
+
+    # -- Render pipeline (Remotion + Nova + reel length) --
+    render: RenderBudget = field(default_factory=RenderBudget)
 
 
 # ---- Exceptions ----

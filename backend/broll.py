@@ -19,7 +19,7 @@ import boto3
 import requests
 
 import nova_reel
-from guardrails import RunContext, log as glog
+from guardrails import RunContext, RenderBudget, log as glog
 
 _s3 = boto3.client("s3")
 _ssm = boto3.client("ssm")
@@ -181,6 +181,18 @@ def handler(event: dict[str, Any], _ctx) -> dict[str, Any]:
     # AI-generated and the detail shots as stock footage.
     nova_shots = [s for s in shots if s["shot_idx"] == 0]
     pexels_shots = [s for s in shots if s["shot_idx"] != 0]
+
+    # Guardrail: cap Nova shots per reel to prevent cost runaway. Excess
+    # primary shots are demoted to Pexels.
+    budget = RenderBudget()
+    if len(nova_shots) > budget.max_nova_shots_per_reel:
+        demoted = nova_shots[budget.max_nova_shots_per_reel:]
+        nova_shots = nova_shots[:budget.max_nova_shots_per_reel]
+        pexels_shots.extend(demoted)
+        glog(
+            f"[broll] guardrail: demoted {len(demoted)} Nova shot(s) to Pexels "
+            f"(cap {budget.max_nova_shots_per_reel})"
+        )
 
     glog(f"[broll] {len(shots)} total shots: {len(nova_shots)} Nova (primary) + {len(pexels_shots)} Pexels (secondary)")
 

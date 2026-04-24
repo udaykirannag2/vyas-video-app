@@ -42,7 +42,7 @@ from agents.screenwriter import write_script, revise_script
 from agents.visual_director import direct as direct_visuals
 from transcript_cleanup import cleanup as cleanup_transcript, segments_for_range
 from audio_slice import slice_scenes
-from guardrails import RunContext, GuardrailsConfig, GuardrailError, log as glog
+from guardrails import RunContext, GuardrailsConfig, RenderBudget, GuardrailError, log as glog
 from models import Idea, Screenplay
 
 app = FastAPI(title="Vyas-Video API")
@@ -401,7 +401,7 @@ def _run_ideation(episode_id: int) -> None:
         # Hard cap at 180 seconds (YouTube Shorts / Instagram Reels limit).
         # If the LLM picked an end_seg that puts the window over 180s, walk
         # back to the last segment that fits.
-        MAX_REEL_SEC = 180.0
+        MAX_REEL_SEC = float(RenderBudget().max_reel_duration_sec)
         candidates = []
         for i, ts in enumerate(topic_segments):
             s_idx = int(ts["start_seg"])
@@ -807,7 +807,7 @@ def _with_visual_director(screenplay: Screenplay) -> Screenplay:
         return screenplay
 
 
-MAX_REEL_DURATION_SEC = 180.0  # YouTube Shorts / Instagram Reels cap
+MAX_REEL_DURATION_SEC = float(RenderBudget().max_reel_duration_sec)
 
 
 def _align_beat_timelines(screenplay: Screenplay) -> Screenplay:
