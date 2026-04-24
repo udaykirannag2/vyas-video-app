@@ -9,6 +9,10 @@ export interface Quote {
 
 export interface Idea {
   title: string;
+  alt_title_1?: string;
+  alt_title_2?: string;
+  hook_title?: string;
+  description?: string;
   hook: string;
   summary: string;
   verse_ref: string;

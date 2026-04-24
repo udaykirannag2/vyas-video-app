@@ -443,6 +443,10 @@ def _run_ideation(episode_id: int) -> None:
             cand = candidates[cid] if cid < len(candidates) else candidates[0]
             ideas_list.append(IdeaModel(
                 title=sc.get("title", "Untitled"),
+                alt_title_1=sc.get("alt_title_1", ""),
+                alt_title_2=sc.get("alt_title_2", ""),
+                hook_title=sc.get("hook_title", ""),
+                description=sc.get("description", ""),
                 hook=sc.get("hook_line", "")[:200],
                 summary=sc.get("summary", ""),
                 verse_ref=sc.get("verse_ref", ""),
@@ -577,6 +581,10 @@ def _idea_view(i: dict[str, Any]) -> dict[str, Any]:
     return {
         "rank": int(i["sk"].split("#")[1]),
         "title": i.get("title", ""),
+        "alt_title_1": i.get("alt_title_1", ""),
+        "alt_title_2": i.get("alt_title_2", ""),
+        "hook_title": i.get("hook_title", ""),
+        "description": i.get("description", ""),
         "hook": i.get("hook", ""),
         "summary": i.get("summary", ""),
         "verse_ref": i.get("verse_ref", ""),
@@ -666,6 +674,10 @@ def _load_idea(ep_id: int, rank: int) -> Idea:
         quotes = raw_quotes or []
     return Idea(
         title=item["title"],
+        alt_title_1=item.get("alt_title_1", ""),
+        alt_title_2=item.get("alt_title_2", ""),
+        hook_title=item.get("hook_title", ""),
+        description=item.get("description", ""),
         hook=item["hook"],
         summary=item["summary"],
         verse_ref=item["verse_ref"],

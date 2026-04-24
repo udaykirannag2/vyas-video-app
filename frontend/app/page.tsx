@@ -534,6 +534,38 @@ function IdeaRow({ idea, onOpen }: { idea: EpisodeIdea; onOpen: () => void }) {
         <h3 style={{ margin: 0, flex: 1 }}>{idea.title}</h3>
         {statusChip}
       </div>
+
+      {/* Alternate titles (for A/B picking at publish time) */}
+      {(idea.alt_title_1 || idea.alt_title_2 || idea.hook_title) && (
+        <div style={{ margin: "6px 0", fontSize: 13, color: "var(--muted)" }}>
+          {idea.alt_title_1 && (
+            <div>
+              <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, marginRight: 6, color: "var(--muted)" }}>alt Q</span>
+              <span style={{ color: "var(--text)" }}>{idea.alt_title_1}</span>
+            </div>
+          )}
+          {idea.alt_title_2 && (
+            <div>
+              <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, marginRight: 6, color: "var(--muted)" }}>alt ⚡</span>
+              <span style={{ color: "var(--text)" }}>{idea.alt_title_2}</span>
+            </div>
+          )}
+          {idea.hook_title && (
+            <div>
+              <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, marginRight: 6, color: "var(--muted)" }}>cover</span>
+              <span style={{ color: "var(--accent)", fontWeight: 700, letterSpacing: 0.5 }}>{idea.hook_title}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Description — reader-facing blurb for publish caption */}
+      {idea.description && (
+        <p style={{ margin: "6px 0", fontStyle: "italic", color: "var(--text)", opacity: 0.9 }}>
+          {idea.description}
+        </p>
+      )}
+
       <p style={{ margin: "6px 0 4px" }}>
         <b>Hook:</b> “{idea.hook}”
       </p>

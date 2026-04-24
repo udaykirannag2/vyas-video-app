@@ -48,29 +48,71 @@ YOUR JOB:
      (Should always be true if the segment detector did its job.)
 
 2. For the TOP 2-3 clips (score ≥ 7), annotate:
-   - title: reel title, max 65 characters. Rules:
-     • Clear before clever — understandable on first read
-     • Use familiar spiritual nouns when present: Krishna, Gita, Namaste,
-       Pandavas, Mind, Intellect, Karma, Ego, Dharma
-     • Prefer a question, contrast, or "true meaning" framing
-     • Avoid overly poetic metaphor unless the metaphor IS the clip's subject
-     • If the clip explains a known concept, title the concept directly
-     • If the clip resolves confusion, use a question title
-     Style examples:
-       "The True Meaning of NAMASTE"
-       "Mind vs. Intellect — Who's Really in Control?"
-       "Why Are There Exactly 5 Pandavas?"
-       "Why Krishna Told Arjuna to Fight"
-       "What Karma Really Means"
-       "Ego vs. Self — What's the Difference?"
-       "Why the Gita Doesn't Teach Escape"
-   - summary: 2-3 sentence description of the arc
-   - why_it_works: 1-2 sentences on audience resonance
-   - hook_line: the single most scroll-stopping line from the clip text.
-     Copy it EXACTLY verbatim. This becomes the pattern-interrupt text on scene 1.
-   - twist_line: the key insight / reframe moment. EXACT verbatim copy.
-   - payoff_line: the conclusion / takeaway. EXACT verbatim copy.
-   - verse_ref: which Bhagavad Gita verse this relates to
+
+   TITLES — write FOUR title variants. Return primary in `title`, then
+   `alt_title_1` (question version), `alt_title_2` (contrast version),
+   `hook_title` (first-line overlay for the reel cover).
+
+   Title rules (applies to all four variants):
+     • 4-9 words. High curiosity. Plain English.
+     • Clear before clever. Understandable on first read.
+     • START FROM THE EMOTIONAL TENSION, not the topic.
+     • Choose ONE of these frames:
+       1. direct question       — "Why Smart People Still Suffer"
+       2. painful contradiction — "You're Not Tired, You're Scattered"
+       3. hidden truth          — "The Real Reason Peace Feels Hard"
+       4. everyday struggle     — "You Don't Need More Motivation"
+       5. sharp reframe         — "Krishna's Fix for Overthinking"
+     • Avoid generic words unless earned: truth, life, wisdom, spiritual,
+       divine, soul, consciousness. Specific > abstract.
+     • Avoid lecture/sermon tone. Avoid bland clip summaries.
+     • Spiritual nouns OK when the clip is literally about them (Krishna,
+       Gita, Karma, Ego, Dharma). Don't pad titles with them.
+     • Make it relevant to: work, relationships, stress, ego, discipline,
+       peace, overthinking, comparison, burnout.
+
+   Good title shapes:
+     "Why Smart People Still Suffer"
+     "You're Not Tired, You're Scattered"
+     "The Real Reason Peace Feels Hard"
+     "Krishna's Fix for Overthinking"
+     "You Don't Need More Motivation"
+     "Mind vs. Intellect — Who's Actually Driving?"
+
+   Variant guidance:
+     - `title`: the strongest, most direct version.
+     - `alt_title_1`: recast as a sharper question (even if primary is already a question, make this one punchier or more specific).
+     - `alt_title_2`: recast as a contrast / contradiction ("X, not Y" or "It's not X, it's Y").
+     - `hook_title`: the version that works as ON-SCREEN cover text (shouted-capitals-friendly, ≤6 words, very punchy).
+
+   DESCRIPTION — reader-facing blurb for YouTube/Instagram caption:
+     - Sentence 1: identify the tension in MODERN language (not spiritual jargon).
+     - Sentence 2: hint at the insight or payoff — don't give it away.
+     - Do NOT repeat the title word-for-word.
+     - Do NOT sound preachy or hype-y.
+     - End with a soft CTA (no exclamation marks, no "watch till the end").
+     - 2 sentences total, ≤ 280 chars.
+
+   BAD description examples (do not produce these):
+     ❌ "In this profound spiritual reel we explore..."
+     ❌ "Watch till the end for divine wisdom..."
+     ❌ "This video explains an important Bhagavad Gita teaching..."
+
+   GOOD description examples:
+     ✅ "Most advice treats overthinking like a motivation problem. Krishna
+        hands Arjuna a specific, unfashionable fix. Worth 90 seconds."
+     ✅ "You know what to do. So why does it feel impossible to do it?
+        The Gita's take is sharper than you'd expect."
+
+   Other fields:
+     - summary: 2-3 sentence description of the narrative arc (internal
+       use, shown in the episode dashboard — NOT the same as description).
+     - why_it_works: 1-2 sentences on audience resonance.
+     - hook_line: the single most scroll-stopping line from the clip text.
+       Copy EXACTLY verbatim. Becomes scene 1's on-screen text.
+     - twist_line: the key insight / reframe moment. EXACT verbatim copy.
+     - payoff_line: the conclusion / takeaway. EXACT verbatim copy.
+     - verse_ref: which Bhagavad Gita verse this relates to.
 
 3. RANK the selected clips: rank 1 = strongest reel.
 
@@ -80,8 +122,12 @@ Return a JSON array of the top 2-3 clips:
     "clip_id": 0,
     "score": 9,
     "rank": 1,
-    "title": "...",
-    "summary": "...",
+    "title": "Why Smart People Still Suffer",
+    "alt_title_1": "Why Can't Smart People Stop Overthinking?",
+    "alt_title_2": "Smart Doesn't Mean Steady",
+    "hook_title": "SMART ISN'T ENOUGH",
+    "description": "Most overthinkers assume they need more clarity. Krishna points at the actual bottleneck — and it isn't intelligence. Worth 60 seconds.",
+    "summary": "Host uses the drunk-genius analogy to show how knowledge gets covered by ego; lands on the idea that wisdom isn't gone, just buried.",
     "why_it_works": "...",
     "hook_line": "...",
     "twist_line": "...",

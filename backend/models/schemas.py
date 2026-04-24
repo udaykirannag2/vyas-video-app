@@ -12,6 +12,15 @@ class Quote(BaseModel):
 
 class Idea(BaseModel):
     title: str
+    # Alternate titles the user can pick from at publish time.
+    alt_title_1: str = ""  # stronger question version
+    alt_title_2: str = ""  # stronger contrast version
+    # First-line overlay text for the reel cover thumbnail.
+    hook_title: str = ""
+    # Reader-facing blurb (tension → insight hint → soft CTA).
+    # Used for YouTube/Instagram caption. Different from `summary` which is
+    # an internal narrative arc description.
+    description: str = ""
     hook: str = Field(..., description="First 3 seconds of the reel")
     summary: str
     verse_ref: str
