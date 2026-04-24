@@ -680,6 +680,7 @@ function IdeaView({
   const [reviseInput, setReviseInput] = useState("");
   const [renderStatus, setRenderStatus] = useState<string | null>(null);
   const [mp4Url, setMp4Url] = useState<string | null>(null);
+  const [idea, setIdea] = useState<EpisodeIdea | null>(null);
 
   // Load existing script on mount. If a script is GENERATING (e.g. user
   // navigated away and came back), resume polling automatically.
@@ -690,6 +691,7 @@ function IdeaView({
       if (!ep || cancelled) return;
       const idea = ep.ideas.find((i) => i.rank === rank);
       if (!idea) return;
+      setIdea(idea);
       setRenderStatus(idea.render_status);
       setScriptVersion(idea.script_version);
 
@@ -999,20 +1001,59 @@ function IdeaView({
       )}
 
       {renderStatus === "READY" && mp4Url && script && (
-        <Publish script={script} mp4Url={mp4Url} />
+        <Publish script={script} mp4Url={mp4Url} idea={idea} />
       )}
     </div>
   );
 }
 
-function Publish({ script, mp4Url }: { script: ScriptResponse; mp4Url: string }) {
+function Publish({
+  script,
+  mp4Url,
+  idea,
+}: {
+  script: ScriptResponse;
+  mp4Url: string;
+  idea: EpisodeIdea | null;
+}) {
   const [caption, setCaption] = useState(script.caption);
   const [tags, setTags] = useState(script.hashtags.join(" "));
-  const copy = (t: string) => navigator.clipboard.writeText(t);
+  const copy = (t: string) => {
+    navigator.clipboard.writeText(t);
+  };
+
+  // Build the transcript by concatenating every beat's voiceover text.
+  const transcript = (script.beats || [])
+    .map(
+      (b, i) =>
+        `[Beat ${i + 1} · ${b.start.toFixed(0)}–${b.end.toFixed(0)}s] ${b.voiceover}`,
+    )
+    .join("\n\n");
+
+  const hasAltTitles =
+    idea && (idea.alt_title_1 || idea.alt_title_2 || idea.hook_title);
+
+  const panelStyle: React.CSSProperties = {
+    border: "1px solid var(--border)",
+    borderRadius: 10,
+    padding: 16,
+    background: "rgba(255,255,255,0.02)",
+    marginTop: 16,
+  };
+  const panelTitleStyle: React.CSSProperties = {
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    color: "var(--muted)",
+    marginBottom: 10,
+    fontWeight: 700,
+  };
 
   return (
     <div style={{ marginTop: 20, borderTop: "1px solid var(--border)", paddingTop: 20 }}>
       <h3 style={{ marginTop: 0 }}>Publish</h3>
+
+      {/* Row 1: Video preview + caption/hashtags */}
       <div
         style={{
           display: "grid",
@@ -1032,35 +1073,21 @@ function Publish({ script, mp4Url }: { script: ScriptResponse; mp4Url: string })
           }}
         />
         <div>
-          <label style={{ color: "var(--muted)", fontSize: 13 }}>Caption</label>
+          <label className="label">Caption</label>
           <textarea
+            className="textarea"
             value={caption}
             onChange={(e) => setCaption(e.target.value)}
             rows={4}
-            style={{
-              width: "100%",
-              background: "#0b0d12",
-              color: "var(--text)",
-              border: "1px solid var(--border)",
-              borderRadius: 8,
-              padding: 10,
-              marginBottom: 10,
-            }}
+            style={{ marginBottom: 10 }}
           />
-          <label style={{ color: "var(--muted)", fontSize: 13 }}>Hashtags</label>
+          <label className="label">Hashtags</label>
           <textarea
+            className="textarea"
             value={tags}
             onChange={(e) => setTags(e.target.value)}
             rows={2}
-            style={{
-              width: "100%",
-              background: "#0b0d12",
-              color: "var(--text)",
-              border: "1px solid var(--border)",
-              borderRadius: 8,
-              padding: 10,
-              marginBottom: 10,
-            }}
+            style={{ marginBottom: 10 }}
           />
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <a href={mp4Url} download="reel.mp4" className="btn btn-primary">
@@ -1091,6 +1118,167 @@ function Publish({ script, mp4Url }: { script: ScriptResponse; mp4Url: string })
           </div>
         </div>
       </div>
+
+      {/* Row 2: Alternative titles + description panel */}
+      {(hasAltTitles || idea?.description) && (
+        <div style={panelStyle}>
+          <div style={panelTitleStyle}>Title variants & description</div>
+
+          {idea?.title && (
+            <TitleRow
+              label="primary"
+              text={idea.title}
+              onCopy={() => copy(idea.title)}
+              bold
+            />
+          )}
+          {idea?.alt_title_1 && (
+            <TitleRow
+              label="alt Q"
+              text={idea.alt_title_1}
+              onCopy={() => copy(idea.alt_title_1 || "")}
+            />
+          )}
+          {idea?.alt_title_2 && (
+            <TitleRow
+              label="alt ⚡"
+              text={idea.alt_title_2}
+              onCopy={() => copy(idea.alt_title_2 || "")}
+            />
+          )}
+          {idea?.hook_title && (
+            <TitleRow
+              label="cover"
+              text={idea.hook_title}
+              onCopy={() => copy(idea.hook_title || "")}
+              accent
+            />
+          )}
+
+          {idea?.description && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ color: "var(--muted)", fontSize: 12, marginBottom: 6 }}>
+                Description (for caption / blurb)
+              </div>
+              <div
+                style={{
+                  background: "#0b0d12",
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  padding: "10px 12px",
+                  fontSize: 14,
+                  lineHeight: 1.5,
+                  fontStyle: "italic",
+                  marginBottom: 8,
+                }}
+              >
+                {idea.description}
+              </div>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => copy(idea.description || "")}
+              >
+                Copy description
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Row 3: Transcript panel */}
+      {transcript && (
+        <div style={panelStyle}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "baseline",
+              marginBottom: 10,
+            }}
+          >
+            <div style={panelTitleStyle}>Transcript ({script.beats.length} beats)</div>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => copy(transcript)}
+            >
+              Copy transcript
+            </button>
+          </div>
+          <div
+            style={{
+              background: "#0b0d12",
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              padding: 14,
+              fontSize: 13,
+              lineHeight: 1.6,
+              maxHeight: 360,
+              overflow: "auto",
+              whiteSpace: "pre-wrap",
+              fontFamily: "ui-monospace, Menlo, monospace",
+            }}
+          >
+            {transcript}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TitleRow({
+  label,
+  text,
+  onCopy,
+  bold = false,
+  accent = false,
+}: {
+  label: string;
+  text: string;
+  onCopy: () => void;
+  bold?: boolean;
+  accent?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "6px 0",
+        borderBottom: "1px solid var(--border)",
+      }}
+    >
+      <span
+        style={{
+          fontSize: 10,
+          textTransform: "uppercase",
+          letterSpacing: 0.8,
+          color: "var(--muted)",
+          minWidth: 48,
+          fontWeight: 600,
+        }}
+      >
+        {label}
+      </span>
+      <span
+        style={{
+          flex: 1,
+          color: accent ? "var(--accent)" : "var(--text)",
+          fontWeight: bold ? 700 : accent ? 700 : 500,
+          letterSpacing: accent ? 0.5 : 0,
+          fontSize: bold ? 16 : 14,
+        }}
+      >
+        {text}
+      </span>
+      <button
+        className="btn btn-secondary btn-sm"
+        onClick={onCopy}
+        style={{ flexShrink: 0 }}
+      >
+        Copy
+      </button>
     </div>
   );
 }
