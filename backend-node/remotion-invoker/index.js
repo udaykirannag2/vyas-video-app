@@ -38,22 +38,50 @@ exports.handler = async (event) => {
     { expiresIn: 2 * 60 * 60 },
   );
 
-  // Build the Remotion inputProps the <Reel /> composition expects.
+  // Build the Remotion inputProps — STRIP to the minimum the Reel composition
+  // actually reads. Remotion replicates inputProps across every render chunk,
+  // so a fat payload (visual descriptions, broll_queries, voiceover text) →
+  // 6MB Lambda response limit exceeded → Runtime.TruncatedResponse.
+  const fullScript = await fetchScript(event);
+  const leanScript = {
+    duration_sec: fullScript.duration_sec,
+    aspect: fullScript.aspect || "9:16",
+    beats: (fullScript.beats || []).map((b) => ({
+      start: b.start,
+      end: b.end,
+      on_screen_text: b.on_screen_text || "",
+      // shots only need duration for tile layout
+      shots: (b.shots || []).map((s) => ({
+        shot_duration_sec: s.shot_duration_sec,
+      })),
+    })),
+  };
+  // Strip broll entries to just the URL + global_id (drop matched_query,
+  // pexels_id, nova_invocation_arn, etc. that Remotion never reads).
+  const leanBroll = (event.shot_broll || event.scene_broll || []).map((b) => ({
+    global_id: b.global_id,
+    broll_url: b.broll_url || null,
+  }));
+  // Strip audio entries likewise.
+  const leanAudio = (event.scene_audio || []).map((a) => ({
+    index: a.index,
+    audio_url: a.audio_url,
+  }));
+
   const inputProps = {
-    script: await fetchScript(event),
-    sceneAudio: event.scene_audio || [],
-    sceneBroll: event.scene_broll || [],
+    script: leanScript,
+    sceneAudio: leanAudio,
+    shotBroll: leanBroll,
+    sceneBroll: leanBroll,  // legacy alias
     assetsBucket: ASSETS_BUCKET,
     projectId: `${episode_id}/idea-${idea_rank}`,
-    // Multi-shot broll (new) + legacy compat
-    shotBroll: event.shot_broll || event.scene_broll || [],
-    sceneBroll: event.scene_broll || event.shot_broll || [],
-    // Outro clip appended to every reel
     outroUrl,
     outroDurationSec: OUTRO_DURATION_SEC,
   };
 
   // 1. Kick off render — SDK handles all version/payload wiring.
+  // framesPerLambda=300 → 10s chunks at 30fps. Fewer chunks = smaller
+  // aggregated progress response, staying under the 6MB Lambda cap.
   const { renderId, bucketName } = await renderMediaOnLambda({
     region: REGION,
     functionName: FUNCTION_NAME,
@@ -65,6 +93,7 @@ exports.handler = async (event) => {
     outName: outputKey,
     privacy: "private",
     maxRetries: 1,
+    framesPerLambda: 300,
   });
   console.log("renderId", renderId, "bucket", bucketName);
 
