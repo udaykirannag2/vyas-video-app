@@ -72,9 +72,18 @@ def slice_scenes(
     version: str,
     script: dict[str, Any],
     source_audio_key: str,
+    audio_prefix: str | None = None,
 ) -> list[dict[str, Any]]:
     """Download source once, slice each scene into its own MP3, upload to S3,
-    return a list of `{index, audio_key, audio_url, source}` ready for Remotion."""
+    return a list of `{index, audio_key, audio_url, source}` ready for Remotion.
+
+    audio_prefix: override the S3 directory for output slices. Defaults to
+    episodes/{episode_id}/idea-{idea_rank}/scripts/{version}/tts.
+    Pass e.g. "shorts/{short_id}/render-{version}/audio" for the shorts pipeline.
+    """
+    default_prefix = f"episodes/{episode_id}/idea-{idea_rank}/scripts/{version}/tts"
+    prefix = audio_prefix or default_prefix
+
     with tempfile.TemporaryDirectory(prefix="audio-slice-") as work:
         source_local = os.path.join(work, "source")
         _s3.download_file(BUCKET, source_audio_key, source_local)
@@ -83,9 +92,7 @@ def slice_scenes(
         # Support new beats[] and legacy scenes[] layout.
         segments = script.get("beats") or script.get("scenes") or []
         for i, scene in enumerate(segments):
-            out_key = (
-                f"episodes/{episode_id}/idea-{idea_rank}/scripts/{version}/tts/scene_{i:02d}.mp3"
-            )
+            out_key = f"{prefix}/scene_{i:02d}.mp3"
             out_local = os.path.join(work, f"scene_{i:02d}.mp3")
             src_start = scene.get("source_start")
             src_end = scene.get("source_end")

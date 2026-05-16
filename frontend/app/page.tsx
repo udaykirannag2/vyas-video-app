@@ -87,6 +87,12 @@ function App({ user }: { user: string | null }) {
             >
               <span className="icon">➕</span> New Episode
             </button>
+            <a
+              href="/shorts"
+              className="sidebar-item"
+            >
+              <span className="icon">🎬</span> Short → Video
+            </a>
           </div>
           {episodes.length > 0 && (
             <div className="sidebar-section">

@@ -212,4 +212,34 @@ export const api = {
     ),
   assetUrl: (key: string) =>
     req<{ url: string }>(`/assets/url?key=${encodeURIComponent(key)}`),
+
+  // ── Shorts ──────────────────────────────────────────────────────────────
+  shortUploadUrl: (filename: string) =>
+    req<{ url: string; video_key: string; short_id: string; content_type: string }>(
+      "/shorts/upload-url",
+      { method: "POST", body: JSON.stringify({ filename }) },
+    ),
+  createShort: (title: string, videoKey: string) =>
+    req<{ short_id: string; status: string }>(
+      "/shorts",
+      { method: "POST", body: JSON.stringify({ title, video_key: videoKey }) },
+    ),
+  shortStatus: (id: string) =>
+    req<{
+      short_id: string;
+      title: string;
+      status: string;
+      mp4_key?: string;
+      duration_sec: number;
+      failure_reason?: string;
+    }>(`/shorts/${id}/status`),
+  generateShort: (id: string) =>
+    req<{ short_id: string; version: string; status: string }>(
+      `/shorts/${id}/generate`,
+      { method: "POST" },
+    ),
+  listShorts: () =>
+    req<{ shorts: { short_id: string; title: string; status: string; created_at: string }[] }>(
+      "/shorts",
+    ),
 };

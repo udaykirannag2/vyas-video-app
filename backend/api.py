@@ -162,6 +162,10 @@ def _ep_pk(ep_id: int | str) -> str:
     return f"EPISODE#{ep_id}"
 
 
+def _short_pk(short_id: str) -> str:
+    return f"SHORT#{short_id}"
+
+
 # ---------- Requests ----------
 
 
@@ -178,6 +182,15 @@ class CreateEpisodeRequest(BaseModel):
 
 class ReviseScriptRequest(BaseModel):
     instruction: str
+
+
+class ShortUploadUrlRequest(BaseModel):
+    filename: str  # e.g. "clip.mp4"
+
+
+class CreateShortRequest(BaseModel):
+    title: str = ""
+    video_key: str  # returned from /shorts/upload-url
 
 
 # ---------- Helpers ----------
@@ -1136,12 +1149,436 @@ def render_status(episode_id: int, rank: int) -> dict[str, Any]:
 
 @app.get("/assets/url")
 def asset_url(key: str) -> dict[str, str]:
-    if not key.startswith("episodes/"):
-        raise HTTPException(400, "key must be under episodes/")
+    if not key.startswith("episodes/") and not key.startswith("shorts/"):
+        raise HTTPException(400, "key must be under episodes/ or shorts/")
     url = _s3.generate_presigned_url(
         "get_object", Params={"Bucket": BUCKET, "Key": key}, ExpiresIn=3600
     )
     return {"url": url}
+
+
+# ============================================================
+# SHORTS — short audio-to-video pipeline
+# ============================================================
+# User uploads a short video clip (30-180s) with baked-in audio.
+# We keep the audio verbatim, generate fresh visuals, and render
+# through the same Remotion + outro pipeline as full episodes.
+#
+# Pipeline: upload video → extract audio (FFmpeg) → Transcribe →
+#           Screenwriter → Visual Director → audio_slice →
+#           Step Functions (Broll → Render → Pack)
+# ============================================================
+
+_VIDEO_EXTS = {"mp4", "mov", "m4v", "webm", "avi", "mkv"}
+
+
+def _short_content_type(filename: str) -> str:
+    ext = filename.rsplit(".", 1)[-1].lower()
+    return {
+        "mp4": "video/mp4",
+        "mov": "video/quicktime",
+        "m4v": "video/x-m4v",
+        "webm": "video/webm",
+        "avi": "video/x-msvideo",
+        "mkv": "video/x-matroska",
+    }.get(ext, "video/mp4")
+
+
+def _short_transcribe_media_format(filename: str) -> str:
+    ext = filename.rsplit(".", 1)[-1].lower()
+    # Transcribe supports mp4 and mov directly — no audio pre-extraction needed.
+    return ext if ext in {"mp4", "mov", "m4v", "webm", "ogg", "flac"} else "mp4"
+
+
+def _load_short_meta(short_id: str) -> dict[str, Any]:
+    item = _ddb.get_item(Key={"pk": _short_pk(short_id), "sk": "META"}).get("Item")
+    if not item:
+        raise HTTPException(404, f"short {short_id!r} not found")
+    return item
+
+
+def _sync_short_transcribe_status(meta: dict[str, Any]) -> dict[str, Any]:
+    """Same pattern as _sync_transcribe_status but for shorts."""
+    if meta.get("status") != "TRANSCRIBING":
+        return meta
+    job_name = meta.get("transcribe_job")
+    if not job_name:
+        return meta
+    job = _transcribe.get_transcription_job(TranscriptionJobName=job_name)["TranscriptionJob"]
+    s = job["TranscriptionJobStatus"]
+    if s == "FAILED":
+        _ddb.update_item(
+            Key={"pk": meta["pk"], "sk": "META"},
+            UpdateExpression="SET #s = :s, failure_reason = :r",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":s": "TRANSCRIBE_FAILED",
+                ":r": job.get("FailureReason", "unknown"),
+            },
+        )
+        meta["status"] = "TRANSCRIBE_FAILED"
+        meta["failure_reason"] = job.get("FailureReason", "unknown")
+        return meta
+    if s != "COMPLETED":
+        return meta
+
+    short_id = meta["short_id"]
+    raw = _s3.get_object(Bucket=BUCKET, Key=meta["transcript_json_key"])["Body"].read()
+    data = json.loads(raw)
+    items = data["results"]["items"]
+
+    # Build timed transcript: "(start-end) text\n" per word group
+    transcript_text = data["results"]["transcripts"][0]["transcript"]
+    timed_lines = []
+    for item in items:
+        if item["type"] != "pronunciation":
+            continue
+        st = item.get("start_time", "0")
+        et = item.get("end_time", "0")
+        word = item["alternatives"][0]["content"]
+        timed_lines.append(f"({st}-{et}) {word}")
+    timed_text = "\n".join(timed_lines)
+
+    transcript_txt_key = f"shorts/{short_id}/transcript.txt"
+    transcript_timed_key = f"shorts/{short_id}/transcript_timed.txt"
+    _s3.put_object(Bucket=BUCKET, Key=transcript_txt_key, Body=transcript_text.encode())
+    _s3.put_object(Bucket=BUCKET, Key=transcript_timed_key, Body=timed_text.encode())
+
+    # Estimate duration from last word's end time
+    last_end = 0.0
+    for item in reversed(items):
+        if item["type"] == "pronunciation" and item.get("end_time"):
+            last_end = float(item["end_time"])
+            break
+
+    _ddb.update_item(
+        Key={"pk": meta["pk"], "sk": "META"},
+        UpdateExpression="SET #s = :s, transcript_key = :k, transcript_timed_key = :t, duration_sec = :d",
+        ExpressionAttributeNames={"#s": "status"},
+        ExpressionAttributeValues={
+            ":s": "TRANSCRIBED",
+            ":k": transcript_txt_key,
+            ":t": transcript_timed_key,
+            ":d": Decimal(str(round(last_end, 2))),
+        },
+    )
+    meta["status"] = "TRANSCRIBED"
+    meta["transcript_key"] = transcript_txt_key
+    meta["transcript_timed_key"] = transcript_timed_key
+    meta["duration_sec"] = last_end
+    return meta
+
+
+def _run_short_generate(short_id: str, version: str) -> None:
+    """Background worker: Screenwriter → Visual Director → audio_slice → SFn.
+    Updates RENDER#{version} item with status=RENDERING on success, or
+    RENDER_FAILED on error."""
+    pk = _short_pk(short_id)
+    render_sk = f"RENDER#{version}"
+    try:
+        ctx = RunContext()
+        meta = _load_short_meta(short_id)
+
+        # Load plain + timed transcripts.
+        plain_text = _s3.get_object(Bucket=BUCKET, Key=meta["transcript_key"])["Body"].read().decode()
+        timed_text = _s3.get_object(Bucket=BUCKET, Key=meta["transcript_timed_key"])["Body"].read().decode()
+
+        duration_sec = float(meta.get("duration_sec", 60))
+        title = meta.get("title") or "Short Reel"
+
+        # Build a synthetic idea — the whole clip is the content.
+        idea = {
+            "title": title,
+            "rank": 1,
+            "hook": title,
+            "summary": "",
+            "target_length_sec": int(round(duration_sec)),
+            "window_start": 0.0,
+            "window_end": duration_sec,
+            "window_text": plain_text,
+            "hook_line": "",
+            "twist_line": "",
+            "payoff_line": "",
+        }
+
+        # Screenwriter: plain text idea + timed transcript (for source timestamps).
+        screenplay = ctx.call(
+            "short.write", write_script, idea, timed_text,
+            model="sonnet-4.6", estimated_cost=0.04, estimated_tokens=20000,
+        )
+
+        # Visual Director: polish shot prompts.
+        screenplay = ctx.call(
+            "short.visual_director", _with_visual_director, screenplay,
+            model="haiku-4.5", estimated_cost=0.005, estimated_tokens=5000,
+        )
+        screenplay = _align_beat_timelines(screenplay)
+        script_dict = screenplay.model_dump()
+
+        # Store screenplay JSON in S3 for broll Lambda to read.
+        script_s3_key = f"shorts/{short_id}/render-{version}/screenplay.json"
+        _s3.put_object(
+            Bucket=BUCKET,
+            Key=script_s3_key,
+            Body=json.dumps(script_dict).encode(),
+            ContentType="application/json",
+        )
+
+        # Audio slice: use the extracted audio from the video.
+        audio_prefix = f"shorts/{short_id}/render-{version}/audio"
+        scene_audio = ctx.call(
+            "short.audio_slice", slice_scenes,
+            episode_id=short_id, idea_rank=0, version=version,
+            script=script_dict, source_audio_key=meta["audio_key"],
+            audio_prefix=audio_prefix,
+            is_llm=False, estimated_cost=0,
+        )
+        glog("[short.generate] run summary", **ctx.summary())
+
+        # Kick off Step Functions render (Broll → Render → Pack).
+        # Pass ddb_pk/ddb_sk so pack.py updates SHORT#{id} / RENDER#{v}.
+        output_key = f"shorts/{short_id}/render-{version}/final.mp4"
+        execution = _sfn.start_execution(
+            stateMachineArn=STATE_MACHINE,
+            name=f"short-{short_id[:8]}-{version}",
+            input=json.dumps(
+                _floats_to_decimal({
+                    "episode_id": short_id,
+                    "idea_rank": 0,
+                    "version": version,
+                    "script_s3_key": script_s3_key,
+                    "source_audio_key": meta["audio_key"],
+                    "scene_audio": scene_audio,
+                    "output_key": output_key,
+                    # shorts-specific overrides for pack.py
+                    "ddb_pk": pk,
+                    "ddb_sk": render_sk,
+                }),
+                default=str,
+            ),
+        )
+
+        _ddb.update_item(
+            Key={"pk": pk, "sk": render_sk},
+            UpdateExpression="SET #s = :s, execution_arn = :e, screenplay = :sp",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":s": "RENDERING",
+                ":e": execution["executionArn"],
+                ":sp": screenplay.model_dump_json(),
+            },
+        )
+        _ddb.update_item(
+            Key={"pk": pk, "sk": "META"},
+            UpdateExpression="SET #s = :s",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":s": "RENDERING"},
+        )
+    except Exception as e:
+        print(f"[short.generate] failed: {e!r}")
+        _ddb.update_item(
+            Key={"pk": pk, "sk": render_sk},
+            UpdateExpression="SET #s = :s, failure_reason = :r",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":s": "GENERATE_FAILED",
+                ":r": f"{type(e).__name__}: {e}"[:500],
+            },
+        )
+        _ddb.update_item(
+            Key={"pk": pk, "sk": "META"},
+            UpdateExpression="SET #s = :s, failure_reason = :r",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":s": "GENERATE_FAILED",
+                ":r": f"{type(e).__name__}: {e}"[:500],
+            },
+        )
+        raise
+
+
+@app.post("/shorts/upload-url")
+def short_upload_url(req: ShortUploadUrlRequest) -> dict[str, Any]:
+    """Presigned PUT for direct browser upload of the short video."""
+    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", req.filename)[:120] or "clip.mp4"
+    short_id = str(uuid.uuid4())
+    video_key = f"shorts/{short_id}/source/{safe_name}"
+    content_type = _short_content_type(safe_name)
+    url = _s3.generate_presigned_url(
+        "put_object",
+        Params={"Bucket": BUCKET, "Key": video_key, "ContentType": content_type},
+        ExpiresIn=60 * 30,
+    )
+    return {"url": url, "video_key": video_key, "short_id": short_id, "content_type": content_type}
+
+
+@app.post("/shorts")
+def create_short(req: CreateShortRequest) -> dict[str, Any]:
+    """Register an uploaded video as a new short and kick off Transcribe.
+    Transcribe accepts video (MP4/MOV) directly — no pre-extraction needed."""
+    video_key = req.video_key
+    # short_id is embedded in the key: shorts/{short_id}/source/{filename}
+    try:
+        short_id = video_key.split("/")[1]
+    except IndexError:
+        raise HTTPException(400, "invalid video_key format")
+
+    # Verify upload exists.
+    try:
+        head = _s3.head_object(Bucket=BUCKET, Key=video_key)
+    except Exception:
+        raise HTTPException(400, f"video not found at {video_key}")
+
+    # Check for duplicate.
+    if _ddb.get_item(Key={"pk": _short_pk(short_id), "sk": "META"}).get("Item"):
+        raise HTTPException(409, f"short {short_id} already registered")
+
+    # Derive the ext from the key for Transcribe media format.
+    filename = video_key.rsplit("/", 1)[-1]
+    media_format = _short_transcribe_media_format(filename)
+
+    transcript_json_key = f"shorts/{short_id}/transcript.json"
+    job_name = f"vyas-video-short-{short_id[:8]}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}"
+
+    # Extract audio for slicing later: ffmpeg -i source -vn -acodec libmp3lame.
+    # We do this inline (short clips ≤180s → ≤5s FFmpeg time on Lambda).
+    import subprocess
+    import tempfile as _tempfile
+    audio_key = f"shorts/{short_id}/audio.mp3"
+    try:
+        with _tempfile.TemporaryDirectory(prefix="short-audio-") as work:
+            src_local = os.path.join(work, "source")
+            audio_local = os.path.join(work, "audio.mp3")
+            _s3.download_file(BUCKET, video_key, src_local)
+            subprocess.run(
+                ["/opt/bin/ffmpeg", "-y", "-i", src_local,
+                 "-vn", "-acodec", "libmp3lame", "-b:a", "128k", audio_local],
+                check=True, capture_output=True,
+            )
+            with open(audio_local, "rb") as af:
+                _s3.put_object(Bucket=BUCKET, Key=audio_key, Body=af.read(),
+                               ContentType="audio/mpeg")
+    except Exception as e:
+        raise HTTPException(500, f"audio extraction failed: {e}")
+
+    # Start Transcribe on the video (supports MP4/MOV directly).
+    _transcribe.start_transcription_job(
+        TranscriptionJobName=job_name,
+        LanguageCode="en-US",
+        MediaFormat=media_format,
+        Media={"MediaFileUri": f"s3://{BUCKET}/{video_key}"},
+        OutputBucketName=BUCKET,
+        OutputKey=transcript_json_key,
+        Settings={"ShowSpeakerLabels": False},
+    )
+
+    created_at = _now_iso()
+    _ddb.put_item(
+        Item={
+            "pk": _short_pk(short_id),
+            "sk": "META",
+            "short_id": short_id,
+            "title": req.title.strip() or filename,
+            "video_key": video_key,
+            "audio_key": audio_key,
+            "transcript_json_key": transcript_json_key,
+            "transcribe_job": job_name,
+            "status": "TRANSCRIBING",
+            "created_at": created_at,
+            "gsi1pk": "SHORTS",
+            "gsi1sk": created_at,
+        }
+    )
+    return {"short_id": short_id, "status": "TRANSCRIBING"}
+
+
+@app.get("/shorts/{short_id}/status")
+def short_status(short_id: str) -> dict[str, Any]:
+    meta = _load_short_meta(short_id)
+    meta = _sync_short_transcribe_status(meta)
+    # Also sync render status if rendering.
+    if meta.get("status") in ("RENDERING",):
+        render = _latest(f"RENDER#", _short_pk(short_id))
+        if render:
+            render = _sync_render_status(render, _short_pk(short_id))
+            if render.get("status") == "READY":
+                meta["status"] = "READY"
+                meta["mp4_key"] = render.get("mp4_key")
+            elif render.get("status") == "RENDER_FAILED":
+                meta["status"] = "RENDER_FAILED"
+                meta["failure_reason"] = render.get("failure_reason")
+    return {
+        "short_id": short_id,
+        "title": meta.get("title", ""),
+        "status": meta.get("status"),
+        "mp4_key": meta.get("mp4_key"),
+        "duration_sec": float(meta.get("duration_sec", 0) or 0),
+        "failure_reason": meta.get("failure_reason"),
+    }
+
+
+@app.post("/shorts/{short_id}/generate")
+def generate_short(short_id: str) -> dict[str, Any]:
+    """Kick off Screenwriter → Visual Director → audio_slice → render pipeline.
+    Runs async via Lambda self-invoke (avoids API Gateway 30s timeout)."""
+    meta = _load_short_meta(short_id)
+    meta = _sync_short_transcribe_status(meta)
+    status = meta.get("status")
+    if status == "TRANSCRIBING":
+        raise HTTPException(409, "still transcribing; poll /shorts/{id}/status first")
+    if status == "TRANSCRIBE_FAILED":
+        raise HTTPException(422, f"transcription failed: {meta.get('failure_reason')}")
+    if status in ("GENERATING", "RENDERING"):
+        raise HTTPException(409, f"already {status}")
+    if not meta.get("transcript_key"):
+        raise HTTPException(500, "transcript missing")
+
+    version = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    _ddb.put_item(
+        Item={
+            "pk": _short_pk(short_id),
+            "sk": f"RENDER#{version}",
+            "status": "GENERATING",
+            "created_at": _now_iso(),
+        }
+    )
+    _ddb.update_item(
+        Key={"pk": _short_pk(short_id), "sk": "META"},
+        UpdateExpression="SET #s = :s REMOVE failure_reason",
+        ExpressionAttributeNames={"#s": "status"},
+        ExpressionAttributeValues={":s": "GENERATING"},
+    )
+
+    payload = {"internal_task": "short_generate", "short_id": short_id, "version": version}
+    if not SELF_FUNCTION_NAME:
+        _run_short_generate(short_id, version)
+    else:
+        _lambda_client.invoke(
+            FunctionName=SELF_FUNCTION_NAME,
+            InvocationType="Event",
+            Payload=json.dumps(payload).encode(),
+        )
+    return {"short_id": short_id, "version": version, "status": "GENERATING"}
+
+
+@app.get("/shorts")
+def list_shorts() -> dict[str, Any]:
+    resp = _ddb.query(
+        IndexName="byType",
+        KeyConditionExpression=Key("gsi1pk").eq("SHORTS"),
+        ScanIndexForward=False,
+    )
+    return {
+        "shorts": [
+            {
+                "short_id": item.get("short_id", ""),
+                "title": item.get("title", ""),
+                "status": item.get("status", "UNKNOWN"),
+                "created_at": item.get("created_at", ""),
+            }
+            for item in resp.get("Items", [])
+        ]
+    }
 
 
 _mangum = Mangum(app)
@@ -1170,5 +1607,8 @@ def handler(event, context):
                 version=event["version"],
                 instruction=event.get("instruction", ""),
             )
+            return {"ok": True}
+        if task == "short_generate":
+            _run_short_generate(event["short_id"], event["version"])
             return {"ok": True}
     return _mangum(event, context)

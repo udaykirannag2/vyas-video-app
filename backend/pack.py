@@ -39,11 +39,15 @@ def handler(event: dict[str, Any], _ctx) -> dict[str, Any]:
     )
 
     if TABLE:
+        # ddb_pk / ddb_sk allow the shorts pipeline to write to SHORT#<id> / RENDER#<v>
+        # without a separate pack Lambda. Defaults preserve existing episode behaviour.
+        ddb_pk = event.get("ddb_pk", f"EPISODE#{episode_id}")
+        ddb_sk = event.get("ddb_sk", f"IDEA#{idea_rank}#RENDER#{version}")
         _ddb.update_item(
             TableName=TABLE,
             Key={
-                "pk": {"S": f"EPISODE#{episode_id}"},
-                "sk": {"S": f"IDEA#{idea_rank}#RENDER#{version}"},
+                "pk": {"S": ddb_pk},
+                "sk": {"S": ddb_sk},
             },
             UpdateExpression="SET #s = :s, mp4_key = :m",
             ExpressionAttributeNames={"#s": "status"},
