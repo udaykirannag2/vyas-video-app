@@ -90,6 +90,7 @@ function App({ user }: { user: string | null }) {
             <a
               href="/shorts"
               className="sidebar-item"
+              style={{ textDecoration: "none", cursor: "pointer" }}
             >
               <span className="icon">🎬</span> Short → Video
             </a>
