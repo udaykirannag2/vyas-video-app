@@ -63,9 +63,9 @@ class RenderBudget:
     # (Runtime.TruncatedResponse). Invoker warns if the slim payload drifts.
     input_props_max_bytes: int = 10_000       # ~10KB target
 
-    # Per-reel Nova Reel shot cap — 30 Nova clips costs ~$14 and takes
-    # forever. We only generate Nova for the primary shot of each beat,
-    # but cap the total in case of prompt drift.
+    # Per-reel Nova Reel shot cap — Nova's rate limit (~3 starts per 2 min)
+    # means >15 shots can't reliably start in a 15-min Lambda. Shot trimming
+    # (MIN_SHOT_SEC=3.0 in _align_beat_timelines) keeps videos under this cap.
     max_nova_shots_per_reel: int = 15
 
     # Reel length — platforms reject >3 min.

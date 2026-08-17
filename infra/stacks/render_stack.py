@@ -20,7 +20,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "backend"))
 from guardrails import RenderBudget  # type: ignore
 
-from .bundling import backend_code, node_code
+from .bundling import backend_code, node_code, ffmpeg_layer_code
 
 
 class RenderStack(Stack):
@@ -28,6 +28,18 @@ class RenderStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
 
         shared_code = backend_code()
+
+        # FFmpeg layer for broll Lambda — used to extract a mid-clip JPEG frame
+        # for the shot quality scorer (agents/shot_scorer.py). Same binary as
+        # the API Lambda layer; CUSTOM hash prevents unnecessary rebuilds.
+        ffmpeg_layer = _lambda.LayerVersion(
+            self,
+            "FfmpegLayer",
+            code=ffmpeg_layer_code(),
+            compatible_runtimes=[_lambda.Runtime.PYTHON_3_11],
+            compatible_architectures=[_lambda.Architecture.ARM_64],
+            description="Static ffmpeg + ffprobe (ARM64) for shot scoring",
+        )
 
         # DynamoDB single table: episodes, ideas, scripts, render metadata.
         # Lives in the storage tier alongside the assets bucket so both the API
@@ -87,11 +99,20 @@ class RenderStack(Stack):
             architecture=_lambda.Architecture.ARM_64,
             handler="broll.handler",
             code=shared_code,
-            # 15 min so Nova Reel fallback has room — Nova jobs take 3-5 min
-            # each and we wait on up to 3 in parallel.
+            # 15 min: all Nova jobs polled in parallel (~5 min) + scoring
+            # semaphore-limited to 4 concurrent ffmpeg processes (~400 MB peak).
+            # 1024 MB: 4×ffmpeg(~100 MB) + boto3/Python(~150 MB) + headroom.
             timeout=Duration.minutes(15),
-            memory_size=512,
-            environment=common_env,
+            memory_size=1024,
+            environment={
+                **common_env,
+                # Quality retries disabled: they trigger more Nova starts that
+                # exhaust the rate limit quota. Scorer still runs for CloudWatch
+                # visibility. Re-enable once quota is higher.
+                "SHOT_SCORE_RETRY_THRESHOLD": "0",
+                "SHOT_ALIGNMENT_THRESHOLD": "0",
+            },
+            layers=[ffmpeg_layer],
         )
         self.assets_bucket.grant_read_write(broll_fn)
         broll_fn.add_to_role_policy(
