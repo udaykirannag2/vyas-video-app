@@ -40,6 +40,7 @@ from agents.segment_detector import detect_segments
 from agents.clip_scorer import score_clips
 from agents.screenwriter import write_script, revise_script
 from agents.visual_director import direct as direct_visuals
+from agents.screenplay_judge import judge_screenplay
 from transcript_cleanup import cleanup as cleanup_transcript, segments_for_range
 from audio_slice import slice_scenes
 from guardrails import RunContext, GuardrailsConfig, RenderBudget, GuardrailError, log as glog
@@ -191,6 +192,14 @@ class ShortUploadUrlRequest(BaseModel):
 class CreateShortRequest(BaseModel):
     title: str = ""
     video_key: str  # returned from /shorts/upload-url
+
+
+class UpdateShortCaptionRequest(BaseModel):
+    caption: str
+
+
+class UpdateBeatsRequest(BaseModel):
+    beats: list[dict[str, Any]]
 
 
 # ---------- Helpers ----------
@@ -852,11 +861,26 @@ def _align_beat_timelines(screenplay: Screenplay) -> Screenplay:
         beat.start = round(t, 2)
         beat.end = round(t + dur, 2)
         if beat.shots:
-            shot_total = sum(s.shot_duration_sec for s in beat.shots)
-            if shot_total > 0 and abs(shot_total - dur) > 0.5:
-                scale = dur / shot_total
-                for s in beat.shots:
-                    s.shot_duration_sec = round(s.shot_duration_sec * scale, 2)
+            # ── Minimum shot duration enforcement ──────────────────────────
+            # Nova Reel clips are 6s but we display them for shot_duration_sec.
+            # Anything under 3s cuts too fast to read. If the beat is short
+            # relative to its shot count, trim excess shots (keep first N)
+            # so every remaining shot gets at least MIN_SHOT_SEC on screen.
+            MIN_SHOT_SEC = 3.0
+            max_shots = max(1, int(dur / MIN_SHOT_SEC))
+            if len(beat.shots) > max_shots:
+                print(
+                    f"[align] beat {i+1} ({dur:.1f}s): trimming {len(beat.shots)} shots "
+                    f"→ {max_shots} (min {MIN_SHOT_SEC}s/shot)"
+                )
+                beat.shots = beat.shots[:max_shots]
+
+            # Distribute beat duration evenly across remaining shots.
+            n = len(beat.shots)
+            per_shot = round(dur / n, 2)
+            for j, s in enumerate(beat.shots):
+                # Last shot absorbs rounding remainder so shots sum exactly to dur.
+                s.shot_duration_sec = per_shot if j < n - 1 else round(dur - per_shot * (n - 1), 2)
         t += dur
         kept_beats.append(beat)
 
@@ -1315,6 +1339,19 @@ def _run_short_generate(short_id: str, version: str) -> None:
         screenplay = _align_beat_timelines(screenplay)
         script_dict = screenplay.model_dump()
 
+        # Judge: evaluate the post-Visual-Director screenplay quality.
+        # Non-fatal — a judge failure must never block the render.
+        evaluation: dict | None = None
+        try:
+            evaluation = ctx.call(
+                "short.judge", judge_screenplay, screenplay,
+                model="haiku-4.5", estimated_cost=0.005, estimated_tokens=5000,
+                is_llm=True,
+            )
+            print(f"[short.judge] score={evaluation.get('overall_score')} verdict={evaluation.get('verdict')}")
+        except Exception as _je:
+            print(f"[short.judge] non-fatal, skipping: {_je!r}")
+
         # Store screenplay JSON in S3 for broll Lambda to read.
         script_s3_key = f"shorts/{short_id}/render-{version}/screenplay.json"
         _s3.put_object(
@@ -1360,12 +1397,13 @@ def _run_short_generate(short_id: str, version: str) -> None:
 
         _ddb.update_item(
             Key={"pk": pk, "sk": render_sk},
-            UpdateExpression="SET #s = :s, execution_arn = :e, screenplay = :sp",
+            UpdateExpression="SET #s = :s, execution_arn = :e, screenplay = :sp, evaluation = :ev",
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues={
                 ":s": "RENDERING",
                 ":e": execution["executionArn"],
                 ":sp": screenplay.model_dump_json(),
+                ":ev": json.dumps(evaluation) if evaluation else json.dumps({}),
             },
         )
         _ddb.update_item(
@@ -1391,6 +1429,116 @@ def _run_short_generate(short_id: str, version: str) -> None:
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues={
                 ":s": "GENERATE_FAILED",
+                ":r": f"{type(e).__name__}: {e}"[:500],
+            },
+        )
+        raise
+
+
+def _run_short_rerender(short_id: str, version: str) -> None:
+    """Background worker: skip Screenwriter + Visual Director; re-render with the
+    existing (possibly user-edited) screenplay stored in RENDER#{version}."""
+    pk = _short_pk(short_id)
+    render_sk = f"RENDER#{version}"
+    try:
+        meta = _load_short_meta(short_id)
+
+        # Load screenplay the rerender endpoint already wrote into the new RENDER# item.
+        render_item = _ddb.get_item(Key={"pk": pk, "sk": render_sk}).get("Item", {})
+        sp_raw = render_item.get("screenplay")
+        if not sp_raw:
+            raise ValueError("screenplay missing from render item")
+        sp_dict = json.loads(sp_raw) if isinstance(sp_raw, str) else sp_raw
+
+        # Re-apply shot trimming (MIN_SHOT_SEC enforcement).
+        # Old screenplays may have many short shots that exceed Nova's rate
+        # limit. _align_beat_timelines trims shots to ≥3s each, reducing
+        # total shot count to fit within the broll Lambda's 15-min budget.
+        try:
+            screenplay = Screenplay(**sp_dict)
+            screenplay = _align_beat_timelines(screenplay)
+            sp_dict = screenplay.model_dump()
+            sp_json_str = screenplay.model_dump_json()
+            print(
+                f"[short.rerender] re-aligned: {len(screenplay.beats)} beats, "
+                f"{sum(len(b.shots) for b in screenplay.beats)} shots, "
+                f"{screenplay.duration_sec}s"
+            )
+        except Exception as e:
+            print(f"[short.rerender] re-align failed (using original): {e!r}")
+            sp_json_str = sp_raw if isinstance(sp_raw, str) else json.dumps(sp_raw)
+
+        # Store screenplay in S3 (broll Lambda reads it from there).
+        script_s3_key = f"shorts/{short_id}/render-{version}/screenplay.json"
+        _s3.put_object(
+            Bucket=BUCKET, Key=script_s3_key,
+            Body=sp_json_str.encode(), ContentType="application/json",
+        )
+
+        # Re-slice audio (same source track, new version prefix).
+        audio_prefix = f"shorts/{short_id}/render-{version}/audio"
+        ctx = RunContext()
+        scene_audio = ctx.call(
+            "short.audio_slice", slice_scenes,
+            episode_id=short_id, idea_rank=0, version=version,
+            script=sp_dict, source_audio_key=meta["audio_key"],
+            audio_prefix=audio_prefix,
+            is_llm=False, estimated_cost=0,
+        )
+        glog("[short.rerender] run summary", **ctx.summary())
+
+        output_key = f"shorts/{short_id}/render-{version}/final.mp4"
+        execution = _sfn.start_execution(
+            stateMachineArn=STATE_MACHINE,
+            name=f"short-{short_id[:8]}-{version}",
+            input=json.dumps(
+                _floats_to_decimal({
+                    "episode_id": short_id,
+                    "idea_rank": 0,
+                    "version": version,
+                    "script_s3_key": script_s3_key,
+                    "source_audio_key": meta["audio_key"],
+                    "scene_audio": scene_audio,
+                    "output_key": output_key,
+                    "ddb_pk": pk,
+                    "ddb_sk": render_sk,
+                }),
+                default=str,
+            ),
+        )
+
+        _ddb.update_item(
+            Key={"pk": pk, "sk": render_sk},
+            UpdateExpression="SET #s = :s, execution_arn = :e",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":s": "RENDERING",
+                ":e": execution["executionArn"],
+            },
+        )
+        _ddb.update_item(
+            Key={"pk": pk, "sk": "META"},
+            UpdateExpression="SET #s = :s",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":s": "RENDERING"},
+        )
+    except Exception as e:
+        print(f"[short.rerender] failed: {e!r}")
+        _ddb.update_item(
+            Key={"pk": pk, "sk": render_sk},
+            UpdateExpression="SET #s = :s, failure_reason = :r",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":s": "RENDER_FAILED",
+                ":r": f"{type(e).__name__}: {e}"[:500],
+            },
+        )
+        _ddb.update_item(
+            Key={"pk": pk, "sk": "META"},
+            UpdateExpression="SET #s = :s, failure_reason = :r",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":s": "RENDER_FAILED",
                 ":r": f"{type(e).__name__}: {e}"[:500],
             },
         )
@@ -1496,17 +1644,42 @@ def create_short(req: CreateShortRequest) -> dict[str, Any]:
 def short_status(short_id: str) -> dict[str, Any]:
     meta = _load_short_meta(short_id)
     meta = _sync_short_transcribe_status(meta)
-    # Also sync render status if rendering.
+    pk = _short_pk(short_id)
+    caption: str | None = None
+    hashtags: list[str] = []
+    evaluation: dict | None = None
+
+    # Sync render status when still in flight.
     if meta.get("status") in ("RENDERING",):
-        render = _latest(f"RENDER#", _short_pk(short_id))
+        render = _latest("RENDER#", pk)
         if render:
-            render = _sync_render_status(render, _short_pk(short_id))
+            render = _sync_render_status(render, pk)
             if render.get("status") == "READY":
                 meta["status"] = "READY"
                 meta["mp4_key"] = render.get("mp4_key")
             elif render.get("status") == "RENDER_FAILED":
                 meta["status"] = "RENDER_FAILED"
                 meta["failure_reason"] = render.get("failure_reason")
+
+    # Pull caption, hashtags, and evaluation from the RENDER# item when done.
+    if meta.get("status") == "READY":
+        render_item = _latest("RENDER#", pk)
+        if render_item:
+            try:
+                sp_raw = render_item.get("screenplay")
+                sp = json.loads(sp_raw) if isinstance(sp_raw, str) else (sp_raw or {})
+                caption = sp.get("caption") or None
+                hashtags = sp.get("hashtags") or []
+            except Exception:
+                pass
+            try:
+                ev_raw = render_item.get("evaluation")
+                if ev_raw:
+                    ev = json.loads(ev_raw) if isinstance(ev_raw, str) else ev_raw
+                    evaluation = ev if ev else None
+            except Exception:
+                pass
+
     return {
         "short_id": short_id,
         "title": meta.get("title", ""),
@@ -1514,7 +1687,127 @@ def short_status(short_id: str) -> dict[str, Any]:
         "mp4_key": meta.get("mp4_key"),
         "duration_sec": float(meta.get("duration_sec", 0) or 0),
         "failure_reason": meta.get("failure_reason"),
+        "caption": caption,
+        "hashtags": hashtags,
+        "evaluation": evaluation,
     }
+
+
+@app.patch("/shorts/{short_id}/caption")
+def update_short_caption(short_id: str, body: UpdateShortCaptionRequest) -> dict[str, Any]:
+    """Update the YouTube description (caption) stored in the latest RENDER# item."""
+    pk = _short_pk(short_id)
+    render_item = _latest("RENDER#", pk)
+    if not render_item:
+        raise HTTPException(404, "no render found for this short")
+    try:
+        sp_raw = render_item.get("screenplay")
+        sp = json.loads(sp_raw) if isinstance(sp_raw, str) else (sp_raw or {})
+        sp["caption"] = body.caption
+        _ddb.update_item(
+            TableName=TABLE,
+            Key={"pk": {"S": pk}, "sk": {"S": render_item["sk"]}},
+            UpdateExpression="SET screenplay = :sp",
+            ExpressionAttributeValues={":sp": {"S": json.dumps(sp)}},
+        )
+    except Exception as e:
+        raise HTTPException(500, f"failed to update caption: {e}")
+    return {"short_id": short_id, "caption": body.caption}
+
+
+@app.get("/shorts/{short_id}/screenplay")
+def get_short_screenplay(short_id: str) -> dict[str, Any]:
+    """Return the latest screenplay (beats + shots) for display and editing."""
+    pk = _short_pk(short_id)
+    render_item = _latest("RENDER#", pk)
+    if not render_item:
+        raise HTTPException(404, "no render found for this short")
+    sp_raw = render_item.get("screenplay")
+    if not sp_raw:
+        raise HTTPException(404, "screenplay not yet generated")
+    sp = json.loads(sp_raw) if isinstance(sp_raw, str) else sp_raw
+    return {"short_id": short_id, "screenplay": sp}
+
+
+@app.patch("/shorts/{short_id}/screenplay/beats")
+def update_short_beats(short_id: str, body: UpdateBeatsRequest) -> dict[str, Any]:
+    """Overwrite the beats array in the latest screenplay (user-edited visuals)."""
+    pk = _short_pk(short_id)
+    render_item = _latest("RENDER#", pk)
+    if not render_item:
+        raise HTTPException(404, "no render found for this short")
+    try:
+        sp_raw = render_item.get("screenplay")
+        sp = json.loads(sp_raw) if isinstance(sp_raw, str) else (sp_raw or {})
+        sp["beats"] = body.beats
+        new_sp_json = json.dumps(sp)
+        _ddb.update_item(
+            Key={"pk": pk, "sk": render_item["sk"]},
+            UpdateExpression="SET screenplay = :sp",
+            ExpressionAttributeValues={":sp": new_sp_json},
+        )
+    except Exception as e:
+        raise HTTPException(500, f"failed to update beats: {e}")
+    return {"short_id": short_id, "saved": True}
+
+
+@app.post("/shorts/{short_id}/rerender")
+def rerender_short(short_id: str) -> dict[str, Any]:
+    """Re-render using the current (possibly user-edited) screenplay.
+    Skips Screenwriter + Visual Director — goes straight to audio_slice + SFn."""
+    meta = _load_short_meta(short_id)
+
+    # META status can be stale (pack.py historically didn't write it back).
+    # Sync from the latest RENDER# item before deciding whether to block.
+    if meta.get("status") in ("GENERATING", "RENDERING"):
+        pk = _short_pk(short_id)
+        latest_render = _latest("RENDER#", pk)
+        if latest_render:
+            latest_render = _sync_render_status(latest_render, pk)
+            synced = latest_render.get("status")
+            if synced in ("READY", "RENDER_FAILED"):
+                meta["status"] = synced  # META was stale — allow re-render
+
+    if meta.get("status") in ("GENERATING", "RENDERING"):
+        raise HTTPException(409, f"already {meta.get('status')}")
+
+    pk = _short_pk(short_id)
+    existing_render = _latest("RENDER#", pk)
+    if not existing_render:
+        raise HTTPException(404, "no screenplay found; run generate first")
+    sp_raw = existing_render.get("screenplay")
+    if not sp_raw:
+        raise HTTPException(404, "screenplay not yet generated")
+
+    version = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    # Create new RENDER# item with screenplay pre-populated so _run_short_rerender
+    # can load it without needing the screenplay in the Lambda payload.
+    _ddb.put_item(
+        Item={
+            "pk": pk,
+            "sk": f"RENDER#{version}",
+            "status": "RENDERING",
+            "screenplay": sp_raw if isinstance(sp_raw, str) else json.dumps(sp_raw),
+            "created_at": _now_iso(),
+        }
+    )
+    _ddb.update_item(
+        Key={"pk": pk, "sk": "META"},
+        UpdateExpression="SET #s = :s REMOVE failure_reason",
+        ExpressionAttributeNames={"#s": "status"},
+        ExpressionAttributeValues={":s": "RENDERING"},
+    )
+
+    payload = {"internal_task": "short_rerender", "short_id": short_id, "version": version}
+    if not SELF_FUNCTION_NAME:
+        _run_short_rerender(short_id, version)
+    else:
+        _lambda_client.invoke(
+            FunctionName=SELF_FUNCTION_NAME,
+            InvocationType="Event",
+            Payload=json.dumps(payload).encode(),
+        )
+    return {"short_id": short_id, "version": version, "status": "RENDERING"}
 
 
 @app.post("/shorts/{short_id}/generate")
@@ -1610,5 +1903,8 @@ def handler(event, context):
             return {"ok": True}
         if task == "short_generate":
             _run_short_generate(event["short_id"], event["version"])
+            return {"ok": True}
+        if task == "short_rerender":
+            _run_short_rerender(event["short_id"], event["version"])
             return {"ok": True}
     return _mangum(event, context)

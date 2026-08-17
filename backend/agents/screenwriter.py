@@ -38,12 +38,19 @@ BEAT RULES (spoken audio):
   worry about getting timeline math right. Focus on beats and shots.
 
 SHOT RULES (visual clips inside a beat):
-Each beat MUST have 2-4 shots. Each shot is a separate Nova Reel clip.
+Each shot is a separate Nova Reel clip. MINIMUM 3 seconds per shot on screen —
+shots shorter than that cut too fast for the viewer to register the image.
+
+Shot count per beat (based on beat duration):
+  < 6 seconds  → 1 shot  (single sustained image)
+  6-9 seconds  → 2 shots (each ~3-4.5s)
+  9-15 seconds → 2-3 shots
+  > 15 seconds → 3-4 shots
 
 For each shot, provide:
   shot_number: 1, 2, 3... within the beat
-  shot_duration_sec: how many seconds this shot holds (shots tile across the
-    beat duration; they should roughly sum to the beat's source duration)
+  shot_duration_sec: how many seconds this shot holds on screen — MINIMUM 3.0.
+    Shots should roughly sum to the beat's source duration.
   shot_role: one of:
     hook       — pattern interrupt, grabs attention (beat 1 shot 1)
     establish  — sets the scene, grounds the viewer
