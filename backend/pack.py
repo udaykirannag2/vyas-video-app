@@ -43,6 +43,8 @@ def handler(event: dict[str, Any], _ctx) -> dict[str, Any]:
         # without a separate pack Lambda. Defaults preserve existing episode behaviour.
         ddb_pk = event.get("ddb_pk", f"EPISODE#{episode_id}")
         ddb_sk = event.get("ddb_sk", f"IDEA#{idea_rank}#RENDER#{version}")
+
+        # Mark the RENDER# item READY.
         _ddb.update_item(
             TableName=TABLE,
             Key={
@@ -56,5 +58,23 @@ def handler(event: dict[str, Any], _ctx) -> dict[str, Any]:
                 ":m": {"S": event["output_key"]},
             },
         )
+
+        # For the shorts pipeline, also update the META item so that
+        # _load_short_meta() sees READY immediately (prevents stale RENDERING
+        # that blocks re-renders).
+        if ddb_pk.startswith("SHORT#"):
+            _ddb.update_item(
+                TableName=TABLE,
+                Key={
+                    "pk": {"S": ddb_pk},
+                    "sk": {"S": "META"},
+                },
+                UpdateExpression="SET #s = :s, mp4_key = :m",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={
+                    ":s": {"S": "READY"},
+                    ":m": {"S": event["output_key"]},
+                },
+            )
 
     return {**event, "status": "READY"}

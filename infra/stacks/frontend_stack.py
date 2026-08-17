@@ -22,6 +22,20 @@ class FrontendStack(Stack):
             removal_policy=RemovalPolicy.RETAIN,
         )
 
+        # Rewrite /path and /path/ → /path/index.html so Next.js static-export
+        # sub-pages are served correctly (S3 REST API has no directory indexes).
+        url_rewrite = cf.Function(
+            self,
+            "UrlRewriteFn",
+            code=cf.FunctionCode.from_inline(
+                "function handler(event){"
+                "var r=event.request,u=r.uri;"
+                "if(u.endsWith('/'))r.uri+=u==='/'?'index.html':'index.html';"
+                "else if(!u.includes('.'))r.uri+='/index.html';"
+                "return r;}"
+            ),
+        )
+
         distribution = cf.Distribution(
             self,
             "SiteDist",
@@ -30,13 +44,24 @@ class FrontendStack(Stack):
                 origin=origins.S3Origin(bucket),
                 viewer_protocol_policy=cf.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 cache_policy=cf.CachePolicy.CACHING_OPTIMIZED,
+                function_associations=[
+                    cf.FunctionAssociation(
+                        function=url_rewrite,
+                        event_type=cf.FunctionEventType.VIEWER_REQUEST,
+                    )
+                ],
             ),
             error_responses=[
                 cf.ErrorResponse(
+                    http_status=403,
+                    response_http_status=404,
+                    response_page_path="/404.html",
+                ),
+                cf.ErrorResponse(
                     http_status=404,
-                    response_http_status=200,
-                    response_page_path="/index.html",
-                )
+                    response_http_status=404,
+                    response_page_path="/404.html",
+                ),
             ],
             price_class=cf.PriceClass.PRICE_CLASS_100,
         )

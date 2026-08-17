@@ -90,6 +90,39 @@ export interface Screenplay {
   hashtags: string[];
 }
 
+export interface ShotEdit {
+  shot_number: number;
+  shot_duration_sec: number;
+  shot_role: string;
+  visual_mode: string;
+  visual: string;
+  framing: string;
+  camera_movement: string;
+  transition_hint: string;
+  broll_queries: string[];
+  broll_query: string;
+}
+
+export interface BeatEdit {
+  start: number;
+  end: number;
+  source_start?: number | null;
+  source_end?: number | null;
+  voiceover: string;
+  on_screen_text: string;
+  purpose: string;
+  shots: ShotEdit[];
+}
+
+export interface ScreenplayData {
+  title: string;
+  duration_sec: number;
+  aspect: string;
+  caption: string;
+  hashtags: string[];
+  beats: BeatEdit[];
+}
+
 export interface EpisodeSummary {
   episode_id: string;
   name: string;
@@ -232,6 +265,17 @@ export const api = {
       mp4_key?: string;
       duration_sec: number;
       failure_reason?: string;
+      caption?: string;
+      hashtags?: string[];
+      evaluation?: {
+        overall_score: number;
+        visual_quality_score: number;
+        alignment_score: number;
+        house_style_score: number;
+        strengths: string[];
+        improvements: string[];
+        verdict: "STRONG" | "GOOD" | "NEEDS_WORK";
+      };
     }>(`/shorts/${id}/status`),
   generateShort: (id: string) =>
     req<{ short_id: string; version: string; status: string }>(
@@ -241,5 +285,24 @@ export const api = {
   listShorts: () =>
     req<{ shorts: { short_id: string; title: string; status: string; created_at: string }[] }>(
       "/shorts",
+    ),
+  updateShortCaption: (id: string, caption: string) =>
+    req<{ short_id: string; caption: string }>(
+      `/shorts/${id}/caption`,
+      { method: "PATCH", body: JSON.stringify({ caption }) },
+    ),
+  getShortScreenplay: (id: string) =>
+    req<{ short_id: string; screenplay: ScreenplayData }>(
+      `/shorts/${id}/screenplay`,
+    ),
+  updateShortBeats: (id: string, beats: BeatEdit[]) =>
+    req<{ short_id: string; saved: boolean }>(
+      `/shorts/${id}/screenplay/beats`,
+      { method: "PATCH", body: JSON.stringify({ beats }) },
+    ),
+  rerenderShort: (id: string) =>
+    req<{ short_id: string; version: string; status: string }>(
+      `/shorts/${id}/rerender`,
+      { method: "POST" },
     ),
 };

@@ -99,6 +99,11 @@ exports.handler = async (event) => {
     outName: outputKey,
     privacy: "private",
     maxRetries: 1,
+    // Lock to 1080×1920 (9:16 portrait) — YouTube Shorts / Reels standard.
+    // Explicit override prevents accidental landscape output if composition
+    // defaults drift.
+    compositionWidth: 1080,
+    compositionHeight: 1920,
     // Chunk size from RenderBudget.frames_per_chunk (backend/guardrails.py).
     framesPerLambda: FRAMES_PER_CHUNK,
   });

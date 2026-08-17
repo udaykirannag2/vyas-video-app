@@ -145,7 +145,9 @@ Each step does exactly one thing. This eliminates the "phrase extraction + times
 **Timeline normalizer** (`backend/api.py::_align_beat_timelines`):
 - Forces `beat.end - beat.start == beat.source_end - beat.source_start` (reel time matches source time — no audio cut-offs)
 - Enforces 180s hard cap: trims the last beat + drops trailing beats if needed
-- Normalizes shot durations to tile across beat duration
+- **Minimum shot duration** (`MIN_SHOT_SEC = 3.0`): if a beat is too short for its shot count, excess shots are trimmed (keep first N) so every remaining shot holds on screen ≥3s. This also keeps total shot count within the Nova rate-limit budget.
+- Normalizes shot durations to distribute evenly across beat duration (last shot absorbs rounding remainder)
+- Also called during re-renders (`_run_short_rerender`) to apply trimming retroactively to old screenplays
 
 **Audio slicing** (`backend/audio_slice.py`, FFmpeg Lambda layer):
 - Downloads source podcast from S3 (cached per invocation)
@@ -163,19 +165,24 @@ Broll (Python)  →  Render (Node, Remotion)  →  Pack (Python)
 - Flattens beats → shots into a global list with IDs like `b{beat_idx}_s{shot_idx}`
 - For **primary shot** of each beat (`shot_idx=0`): fires Amazon Nova Reel async job ($0.48 per 6s clip)
   - Prompts prefixed with camera style per beat purpose (hook/setup/build/twist/payoff)
-  - Staggered 3s apart to avoid Nova concurrency throttling
-  - Exponential backoff retry on ThrottlingException
-- For **secondary shots**: queries Pexels with `broll_queries` (free, instant)
-- Fallback: if Nova fails, try Pexels; if Pexels fails, gradient background
+  - **Batch-aware starts**: 3 shots per batch, 45s between batches — Nova's rate limit allows ~3 starts per ~120s rolling window; exceeding it causes ThrottlingException with exponential backoff that burns Lambda time
+  - Hard cap: **15 Nova shots per reel** (enforced by `RenderBudget.max_nova_shots_per_reel`); shot trimming at alignment time keeps the reel under this cap
+  - All Nova jobs started first, then polled in parallel (threads) — avoids sequential blocking
+- For **secondary shots** (all shots beyond the primary of each beat): queries Pexels with `broll_queries` (free, instant)
+- Fallback: if Nova fails → Pexels; if Pexels fails → gradient background
+- Scorer semaphore: `threading.Semaphore(4)` limits concurrent ffmpeg frame extractions to avoid OOM at 1024 MB Lambda memory
+- Quality retries disabled (`SHOT_SCORE_RETRY_THRESHOLD=0`, `SHOT_ALIGNMENT_THRESHOLD=0`) — additional Nova jobs would exhaust the rate-limit budget with no meaningful quality gain
 
 **Render step** (`backend-node/remotion-invoker/index.js`):
 - Uses `@remotion/lambda` SDK's `renderMediaOnLambda()` + `getRenderProgress()`
-- Polls until done (up to 12 min budget), copies final MP4 into our assets bucket
+- Polls until done (up to 14 min budget — `invoker_poll_deadline_sec = 840`), copies final MP4 into our assets bucket
 - Remotion composition (`remotion/src/compositions/Reel.tsx`):
   - Each beat = `<Sequence>` containing audio + text overlay
   - Each beat's shots = nested `<Sequence>`s tiling across the beat duration
   - `<OffthreadVideo>` for b-roll (handles long clips without preload timeouts)
   - `object-fit: cover` crops Nova's 1280x720 landscape to 9:16 portrait
+- **inputProps size guard**: warns if props exceed `input_props_max_bytes = 10_000` (10 KB). Remotion replicates inputProps across every chunk renderer; a 59 KB payload × many chunks hits Lambda's 6 MB response cap (`Runtime.TruncatedResponse`). Keep props lean — pass S3 keys, not raw video data.
+- Remotion chunk Lambda: 3008 MB memory, 4096 MB disk, 600s timeout, 150 frames/chunk (5s @ 30fps)
 
 **Pack step** (`backend/pack.py`):
 - Writes `caption.txt`, `hashtags.txt`, `metadata.json` alongside the MP4
@@ -229,6 +236,24 @@ Enforces:
 - **Loop prevention**: aborts on 4 identical outputs (stalled pipeline)
 - **Structured logging**: every step logged with model, attempt, elapsed, est. cost/tokens, total budget spent
 
+### RenderBudget
+
+`RenderBudget` (nested in `GuardrailsConfig`) centralizes all Remotion + Nova thresholds that were previously scattered as magic numbers across `render_stack.py`, the invoker, and `broll.py`:
+
+| Field | Value | Why |
+|---|---|---|
+| `remotion_lambda_memory_mb` | 3008 | More CPU = faster per frame |
+| `remotion_lambda_disk_mb` | 4096 | Room for b-roll caching |
+| `remotion_lambda_timeout_sec` | 600 | 10 min ceiling per chunk |
+| `frames_per_chunk` | 150 | 5s chunks @ 30fps |
+| `invoker_poll_deadline_sec` | 840 | 14 min (must be < invoker Lambda's 15 min timeout) |
+| `input_props_max_bytes` | 10,000 | ~10 KB; exceeding risks `Runtime.TruncatedResponse` |
+| `max_nova_shots_per_reel` | 15 | Nova rate limit: ~3 starts per 2 min → >15 shots can't start within a 15-min Lambda |
+| `max_reel_duration_sec` | 180 | Platform limit for Shorts/Reels |
+| `render_pipeline_max_duration_sec` | 1500 | 25 min Step Functions hard ceiling |
+
+The broll Lambda creates its own `RunContext` with budgets scaled to the shot cap (`max_llm_calls = max_nova_shots * 3 + 10`, `max_cost = max_nova_shots * $0.48 * 3 + $5.00`).
+
 Failures surface in the UI as `SCRIPT_FAILED` or `RENDER_FAILED` with the exact reason + a retry button. `render-status` endpoint also syncs DDB status with the underlying Step Functions execution — if SFn failed silently, DDB is flipped to RENDER_FAILED automatically.
 
 ---
@@ -262,7 +287,7 @@ Failures surface in the UI as `SCRIPT_FAILED` or `RENDER_FAILED` with the exact 
 | Transcribe (20-min audio) | ~$0.50 (one-time) |
 | Ideation (Opus + Sonnet) | ~$0.14 |
 | Script gen + visual director + slice | ~$0.08 per idea |
-| Nova Reel (10 primary shots) | ~$4.80 per reel |
+| Nova Reel (≤15 primary shots, typically 11 for a 38s reel) | ~$5.28 per reel |
 | Pexels (20 secondary shots) | $0 |
 | Remotion Lambda render (~2-3 min on ARM64) | ~$0.01 |
 | S3 + DDB + Step Fn + CloudFront | negligible |
@@ -286,6 +311,23 @@ Hard budget cap: **$8 per run** (enforced by guardrails).
 
 6. **Nova primary + Pexels secondary**: 30 Nova clips per reel cost $14.40 and took 10-15 min. Using Nova only for the hero shot of each beat cuts cost and time by 3× with no perceivable quality loss.
 
+   **Nova rate limit**: ~3 job starts per ~120-second rolling window. Exceeding it causes `ThrottlingException` with exponential backoff (5+10+20+40 = 75s per throttled shot), which blocks the sequential start loop and burns Lambda time. Solution: batch-aware starts — 3 shots, 45s wait, repeat. This eliminates throttling entirely and fits within the 15-min broll Lambda timeout.
+
+7. **Shot pacing floor**: shots under 3s cut too fast to read. `_align_beat_timelines` enforces `MIN_SHOT_SEC = 3.0` — beats with too many shots for their duration get shots trimmed (keeping the first N). This also keeps total shot count within the Nova rate-limit budget. The screenwriter prompt encodes the same rule so well-formed new scripts rarely need trimming.
+
 7. **Hard 180s cap**: enforced in both prompts (soft) and code (hard trim). Reels always pass platform validation.
 
 8. **Guardrails everywhere**: the pipeline has many LLM calls + an expensive AI video step. Without budgets, retry caps, and circuit breakers, one bad episode could burn through a significant budget.
+
+---
+
+## Known failure modes and mitigations
+
+| Symptom | Root cause | Fix |
+|---|---|---|
+| Shots render as black/missing | Shot count exceeded `max_nova_shots_per_reel`; last shots not started before Lambda timeout | `MIN_SHOT_SEC` trimming keeps shots ≤ 15 |
+| Shots change too fast (<2s) | Screenwriter generated 3-4 shots for a 4-6s beat | `MIN_SHOT_SEC = 3.0` enforced at alignment time |
+| broll Lambda times out | Sequential Nova starts throttled; 21 shots × 75s backoff = >15 min | Batch starts (3 per 45s window) + shot cap |
+| `Runtime.TruncatedResponse` from Remotion | inputProps (screenplay + broll keys) exceeded ~10 KB; replicated across chunks hits 6 MB Lambda limit | inputProps size guard; keep props lean (S3 keys only) |
+| META stuck at RENDERING after failure | `pack.py` only updates on success; re-renders that time out in broll never reach pack | `_sync_render_status` in `short_status` endpoint detects SFn `FAILED`/`TIMED_OUT` and flips DDB to `RENDER_FAILED` |
+| OOM in broll Lambda | 21 concurrent ffmpeg frame extractions for scorer (~100 MB each) exceeded 512 MB limit | Scorer semaphore (`threading.Semaphore(4)`) + memory bumped to 1024 MB |
